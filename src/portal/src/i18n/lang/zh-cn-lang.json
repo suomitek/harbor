@@ -1,11 +1,11 @@
 {
     "APP_TITLE": {
-        "VMW_HARBOR": "Harbor",
-        "HARBOR": "Harbor",
+        "VMW_HARBOR": "索米科技",
+        "HARBOR": "Suomitek",
         "VIC": "vSphere Integrated Containers",
         "MGMT": "Management",
         "REG": "Registry",
-        "HARBOR_SWAGGER": "Harbor Swagger",
+        "HARBOR_SWAGGER": "Suomitek Swagger",
         "THEME_DARK_TEXT": "深色主题",
         "THEME_LIGHT_TEXT": "浅色主题"
     },
@@ -121,10 +121,10 @@
         "COMMENT": "注释",
         "PASSWORD": "密码",
         "SAVE_SUCCESS": "成功保存用户设置。",
-        "ADMIN_RENAME_TIP": "单击将用户名改为 \"admin@harbor.local\", 注意这个操作是无法撤销的",
+        "ADMIN_RENAME_TIP": "单击将用户名改为 \"admin@suomitek.local\", 注意这个操作是无法撤销的",
         "RENAME_SUCCESS": "用户名更改成功！",
         "ADMIN_RENAME_BUTTON": "更改用户名",
-        "RENAME_CONFIRM_INFO": "更改用户名为admin@harbor.local是无法撤销的, 你确定更改吗?",
+        "RENAME_CONFIRM_INFO": "更改用户名为admin@suomitek.local是无法撤销的, 你确定更改吗?",
         "CLI_PASSWORD": "CLI密码",
         "CLI_PASSWORD_TIP": "使用docker/helm cli访问Harbor时，可以使用此cli密码作为密码。",
         "COPY_SUCCESS": "复制成功",
@@ -173,8 +173,8 @@
         "LOGS": "日志",
         "TASKS": "任务",
         "API_EXPLORER": "API控制中心",
-        "HARBOR_API_MANAGEMENT": "Harbor Api V2.0",
-        "HELM_API_MANAGEMENT": "Harbor Api"
+        "HARBOR_API_MANAGEMENT": "Suomitek Api V2.0",
+        "HELM_API_MANAGEMENT": "Suomitek Api"
     },
     "USER": {
         "ADD_ACTION": "创建用户",
@@ -1153,7 +1153,7 @@
     },
     "UNKNOWN_ERROR": "发生未知错误,请稍后再试。",
     "UNAUTHORIZED_ERROR": "会话无效或者已经过期, 请重新登录以继续。",
-    "REPO_READ_ONLY": "Harbor 被设置为只读模式，在此模式下，不能删除仓库、artifact、 Tag 及推送镜像。",
+    "REPO_READ_ONLY": "Suomitek 被设置为只读模式，在此模式下，不能删除仓库、artifact、 Tag 及推送镜像。",
     "FORBIDDEN_ERROR": "当前操作被禁止，请确认你有合法的权限。",
     "GENERAL_ERROR": "调用后台服务时出现错误: {{param}}。",
     "BAD_REQUEST_ERROR": "错误请求, 操作无法完成。",
