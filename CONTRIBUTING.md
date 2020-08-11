@@ -2,14 +2,23 @@
 
 ## Welcome
 
-Welcome to Harbor! This guide provides information on filing issues and guidelines for open source contributors. **Please leave comments / suggestions if you find something is missing or incorrect.**
+Harbor is developed in the open, and is constantly being improved by our **users, contributors, and maintainers**.  
+It is because of you that we can bring great software to the community.
 
-Contributors are encouraged to collaborate using the following resources in addition to the GitHub [issue tacker](https://github.com/goharbor/harbor/issues):
+This guide provides information on filing issues and guidelines for open source contributors. **Please leave comments / suggestions if you find something is missing or incorrect.**
 
-**Twitter:** [@project_harbor](https://twitter.com/project_harbor)  
-**User Group:** Join Harbor user email group: [harbor-users@googlegroups.com](https://groups.google.com/forum/#!forum/harbor-users) to get update of Harbor's news, features, releases, or to provide suggestion and feedback. To subscribe, send an email to [harbor-users+subscribe@googlegroups.com](mailto:harbor-users+subscribe@googlegroups.com) .  
-**Developer Group:** Join Harbor developer group: [harbor-dev@googlegroups.com](https://groups.google.com/forum/#!forum/harbor-dev) for discussion on Harbor development and contribution. To subscribe, send an email to [harbor-dev+subscribe@googlegroups.com](mailto:harbor-dev+subscribe@googlegroups.com).  
-**Slack:** Join Harbor's community for discussion and ask questions: [Cloud Native Computing Foundation](https://slack.cncf.io/), channel: #harbor and #harbor-dev
+Contributors are encouraged to collaborate using the following resources in addition to the GitHub [issue tracker](https://github.com/goharbor/harbor/issues):
+
+* [Bi-weekly public community meetings][community-meetings]
+  * Catch up with [past meetings on YouTube][past-meetings]
+* Chat with us on the CNCF Slack ([get an invite here][cncf-slack] )
+  * [#harbor][users-slack] for end-user discussions
+  * [#harbor-dev][dev-slack] for development of Harbor
+* Want long-form communication instead of Slack? We have two distributions lists:
+  * [harbor-users][users-dl] for end-user discussions
+  * [harbor-dev][dev-dl] for development of Harbor
+
+Follow us on Twitter at [@project_harbor][twitter]
 
 ## Getting Started
 
@@ -34,7 +43,7 @@ git fetch $USER
 ```
 **NOTES:** Note that GOPATH can be any directory, the example above uses $HOME/go. Change $USER above to your own GitHub username.
 
-To build the project, please refer the [build](docs/compile_guide.md) guideline.
+To build the project, please refer the [build](https://goharbor.io/docs/2.0.0/build-customize-contribute/compile-guide/) guideline.
 
 ### Repository Structure
 
@@ -43,7 +52,6 @@ Here is the basic structure of the harbor code base. Some of the key folders / f
 .
 ...
 ├── contrib       # Contain documents, scripts, and other helpful things which are contributed by the community
-├── docs          # Keep documents here
 ├── make          # Resource for building and setting up Harbor environment
 ...
 ├── src           # Source code folder
@@ -127,6 +135,9 @@ Harbor backend is written in [Go](http://golang.org/). If you don't have a Harbo
 |   1.6    |    1.9.2      |
 |   1.7    |    1.9.2      |
 |   1.8    |    1.11.2     |
+|   1.9    |    1.12.12    |
+|   1.10   |    1.12.12    |
+|   1.11   |    1.14.5     |
 
 Ensure your GOPATH and PATH have been configured in accordance with the Go environment instructions.
 
@@ -158,8 +169,7 @@ cd $REPO_DIR/src/portal/lib
 npm install
 ```
 
-
-To run the code, please refer to the [build](docs/compile_guide.md) guideline.
+To run the code, please refer to the [build](https://goharbor.io/docs/2.0.0/build-customize-contribute/compile-guide/) guideline.
 
 ## Contribute Workflow
 
@@ -168,9 +178,6 @@ PR are always welcome, even if they only contain small fixes like typos or a few
 Please submit a PR broken down into small changes bit by bit. A PR consisting of a lot features and code changes may be hard to review. It is recommended to submit PRs in an incremental fashion.
 
 Note: If you split your pull request to small changes, please make sure any of the changes goes to master will not break anything. Otherwise, it can not be merged until this feature complete. 
-
-The graphic shown below describes the overall workflow about how to contribute code to Harbor repository.
-![contribute workflow](docs/img/workflow.png)
 
 ### Fork and clone
 
@@ -212,8 +219,8 @@ Write code on the new branch in your fork. The coding style used in Harbor is su
 
 Try to limit column width to 120 characters for both code and markdown documents such as this one.
 
-Always run [golint](https://github.com/golang/lint) on source code before
-committing your changes.
+As we are enforcing standards set by [golint](https://github.com/golang/lint), please always run golint on source code before committing your changes. If it reports an issue, in general, the preferred action is to fix the code to comply with the linter's recommendation 
+because golint gives suggestions according to the stylistic conventions listed in [Effective Go](https://golang.org/doc/effective_go.html) and the [CodeReviewComments](https://github.com/golang/go/wiki/CodeReviewComments).
 ```
 #Install fgt and golint
 
@@ -240,20 +247,20 @@ Run UI library test cases:
 npm run test
 ```
 
-To build code, please refer to [build](docs/compile_guide.md) guideline.
+To build the code, please refer to [build](https://goharbor.io/docs/2.0.0/build-customize-contribute/compile-guide/) guideline.
 
 ###  Keep sync with upstream
 
-```
+
 Once your branch gets out of sync with the goharbor/master branch, use the following commands to update:
-```
+```bash
 git checkout my_feature
 git fetch -a
 git rebase goharbor/master
 
 ```
 
-Please don't use `git pull` instead of the above `fetch / rebase`. `git pull` does a merge, which leaves merge commits. These make the commit history messy and violate the principle that commits ought to be individually understandable and useful (see below). You can also consider changing your `.git/config` file via git config `branch.autoSetupRebase` always to change the behavior of `git pull`.
+Please use `fetch / rebase` (as shown above) instead of `git pull`. `git pull` does a merge, which leaves merge commits. These make the commit history messy and violate the principle that commits ought to be individually understandable and useful (see below). You can also consider changing your `.git/config` file via git config `branch.autoSetupRebase` always to change the behavior of `git pull`.
 
 ### Commit
 
@@ -264,15 +271,15 @@ $ git commit -s -m 'This is my commit message'
 ```
 
 Commit your changes if they're ready:
-```
-#git add -A
+```bash
+git add -A
 git commit -s #-a
 git push --force-with-lease $user my_feature
 ```
 
 The commit message should follow the convention on [How to Write a Git Commit Message](http://chris.beams.io/posts/git-commit/). Be sure to include any related GitHub issue references in the commit message. See [GFM syntax](https://guides.github.com/features/mastering-markdown/#GitHub-flavored-markdown) for referencing issues and commits.
 
-To help write conforming commit messages, it is recommended to set up the [git-good-commit](https://github.com/tommarshall/git-good-commit) commit hook. Run this command in the Harbor repo's root directory:
+To help write conformant commit messages, it is recommended to set up the [git-good-commit](https://github.com/tommarshall/git-good-commit) commit hook. Run this command in the Harbor repo's root directory:
 
 ```
 curl https://cdn.rawgit.com/tommarshall/git-good-commit/v0.6.1/hook.sh > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
@@ -283,7 +290,7 @@ Once your pull request has been opened, harbor will run two CI pipelines against
 1. In the travis CI, your source code will be checked via `golint`, `go vet` and `go race` that makes sure the code is readable, safe and correct. Also all of unit tests will be triggered via `go test` against the pull request. What you need to pay attention to is the travis result and the coverage report.
 * If any failure in travis, you need to figure out whether it is introduced by your commits.
 * If the coverage dramatic decline, you need to commit unit test to coverage your code.
-2. In the drone CI, the E2E test will be triggered against the pull request. The pipeline is about to build and install harbor from source code, then to run four very basic E2E tests to validate the basic functionalities of harbor, like:
+2. In the drone CI, the E2E test will be triggered against the pull request. Also, the source code will be checked via `gosec`, and the result is stored in google storage for later analysis. The pipeline is about to build and install harbor from source code, then to run four very basic E2E tests to validate the basic functionalities of harbor, like:
 * Registry Basic Verification, to validate the image can be pulled and pushed successful.
 * Clair Basic Verification, to validate the image can be scanned successful.
 * Notary Basic Verification, to validate the image can be signed successful.
@@ -324,10 +331,19 @@ Be sure to include the steps to reproduce the problem if applicable. It can help
 
 Update the documentation if you are creating or changing features. Good documentation is as important as the code itself.
 
-The main location for the document is the `docs/` folder. The images referred in documents can be placed in `docs/img`.
+The main location for the documentation is the [website repository](https://github.com/goharbor/website). The images referred to in documents can be placed in `docs/img` in that repo.
 
-Documents are written with Markdown text. See [Writing on GitHub](https://help.github.com/categories/writing-on-github/) for more details.
+Documents are written with Markdown. See [Writing on GitHub](https://help.github.com/categories/writing-on-github/) for more details.
 
 ## Design new features
 
 You can propose new designs for existing Harbor features. You can also design entirely new features, Please submit a proposal in GitHub.(https://github.com/goharbor/community/tree/master/proposals). Harbor maintainers will review this proposal as soon as possible. This is necessary to ensure the overall architecture is consistent and to avoid duplicated work in the roadmap.
+
+[community-meetings]: https://github.com/goharbor/community/blob/master/MEETING_SCHEDULE.md
+[past-meetings]: https://www.youtube.com/playlist?list=PLgInP-D86bCwTC0DYAa1pgupsQIAWPomv
+[users-slack]: https://cloud-native.slack.com/archives/CC1E09J6S
+[dev-slack]: https://cloud-native.slack.com/archives/CC1E0J0MC
+[cncf-slack]: https://slack.cncf.io
+[users-dl]: https://lists.cncf.io/g/harbor-users
+[dev-dl]: https://lists.cncf.io/g/harbor-dev
+[twitter]: http://twitter.com/project_harbor

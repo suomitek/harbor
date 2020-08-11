@@ -24,7 +24,7 @@ import { MessageHandlerService } from '../shared/message-handler/message-handler
 @Component({
     selector: "new-user-modal",
     templateUrl: "new-user-modal.component.html",
-    styleUrls: ['../common.scss']
+    styleUrls: ['../common.scss', "./new-user-madal.component.scss"]
 })
 
 export class NewUserModalComponent {
@@ -39,9 +39,9 @@ export class NewUserModalComponent {
         private userService: UserService,
         private msgHandler: MessageHandlerService) { }
 
-    @ViewChild(NewUserFormComponent)
+    @ViewChild(NewUserFormComponent, {static: true})
     newUserForm: NewUserFormComponent;
-    @ViewChild(InlineAlertComponent)
+    @ViewChild(InlineAlertComponent, {static: false})
     inlineAlert: InlineAlertComponent;
 
     getNewUser(): User {

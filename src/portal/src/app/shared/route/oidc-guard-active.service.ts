@@ -19,10 +19,10 @@ import {
   RouterStateSnapshot,
   CanActivateChild
 } from '@angular/router';
-import { AppConfigService } from '../../app-config.service';
-import { UserPermissionService } from "@harbor/ui";
-import { Observable, of } from 'rxjs';
-import { CommonRoutes } from '../../shared/shared.const';
+import { AppConfigService } from '../../services/app-config.service';
+import { Observable } from 'rxjs';
+import { CommonRoutes } from "../../../lib/entities/shared.const";
+import { UserPermissionService } from "../../../lib/services";
 
 @Injectable()
 export class OidcGuard implements CanActivate, CanActivateChild {

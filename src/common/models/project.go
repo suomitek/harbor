@@ -15,12 +15,26 @@
 package models
 
 import (
+	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/astaxie/beego/orm"
+	"github.com/goharbor/harbor/src/lib/q"
+	"github.com/goharbor/harbor/src/pkg/quota/types"
+	"github.com/goharbor/harbor/src/replication/model"
 )
 
-// ProjectTable is the table name for project
-const ProjectTable = "project"
+const (
+	// ProjectTable is the table name for project
+	ProjectTable = "project"
+	// ProjectPublic means project is public
+	ProjectPublic = "public"
+	// ProjectPrivate means project is private
+	ProjectPrivate = "private"
+)
 
 // Project holds the details of a project.
 type Project struct {
@@ -31,11 +45,13 @@ type Project struct {
 	UpdateTime   time.Time         `orm:"column(update_time);auto_now" json:"update_time"`
 	Deleted      bool              `orm:"column(deleted)" json:"deleted"`
 	OwnerName    string            `orm:"-" json:"owner_name"`
-	Togglable    bool              `orm:"-" json:"togglable"`
 	Role         int               `orm:"-" json:"current_user_role_id"`
+	RoleList     []int             `orm:"-" json:"current_user_role_ids"`
 	RepoCount    int64             `orm:"-" json:"repo_count"`
 	ChartCount   uint64            `orm:"-" json:"chart_count"`
 	Metadata     map[string]string `orm:"-" json:"metadata"`
+	CVEAllowlist CVEAllowlist      `orm:"-" json:"cve_allowlist"`
+	RegistryID   int64             `orm:"column(registry_id)" json:"registry_id"`
 }
 
 // GetMetadata ...
@@ -83,6 +99,15 @@ func (p *Project) VulPrevented() bool {
 	return isTrue(prevent)
 }
 
+// ReuseSysCVEAllowlist ...
+func (p *Project) ReuseSysCVEAllowlist() bool {
+	r, ok := p.GetMetadata(ProMetaReuseSysCVEAllowlist)
+	if !ok {
+		return true
+	}
+	return isTrue(r)
+}
+
 // Severity ...
 func (p *Project) Severity() string {
 	severity, exist := p.GetMetadata(ProMetaSeverity)
@@ -101,9 +126,67 @@ func (p *Project) AutoScan() bool {
 	return isTrue(auto)
 }
 
-func isTrue(value string) bool {
-	return strings.ToLower(value) == "true" ||
-		strings.ToLower(value) == "1"
+// FilterByPublic returns orm.QuerySeter with public filter
+func (p *Project) FilterByPublic(ctx context.Context, qs orm.QuerySeter, key string, value interface{}) orm.QuerySeter {
+	subQuery := `SELECT project_id FROM project_metadata WHERE name = 'public' AND value = '%s'`
+	if isTrue(value) {
+		subQuery = fmt.Sprintf(subQuery, "true")
+	} else {
+		subQuery = fmt.Sprintf(subQuery, "false")
+	}
+	return qs.FilterRaw("project_id", fmt.Sprintf("IN (%s)", subQuery))
+}
+
+// FilterByOwner returns orm.QuerySeter with owner filter
+func (p *Project) FilterByOwner(ctx context.Context, qs orm.QuerySeter, key string, value string) orm.QuerySeter {
+	return qs.FilterRaw("owner_id", fmt.Sprintf("IN (SELECT user_id FROM harbor_user WHERE username = '%s')", value))
+}
+
+// FilterByMember returns orm.QuerySeter with member filter
+func (p *Project) FilterByMember(ctx context.Context, qs orm.QuerySeter, key string, value interface{}) orm.QuerySeter {
+	query, ok := value.(*MemberQuery)
+	if !ok {
+		return qs
+	}
+	subQuery := `SELECT project_id FROM project_member pm, harbor_user u WHERE pm.entity_id = u.user_id AND pm.entity_type = 'u' AND u.username = '%s'`
+	subQuery = fmt.Sprintf(subQuery, escape(query.Name))
+	if query.Role > 0 {
+		subQuery = fmt.Sprintf("%s AND pm.role = %d", subQuery, query.Role)
+	}
+
+	if len(query.GroupIDs) > 0 {
+		var elems []string
+		for _, groupID := range query.GroupIDs {
+			elems = append(elems, strconv.Itoa(groupID))
+		}
+
+		tpl := "(%s) UNION (SELECT project_id FROM project_member pm, user_group ug WHERE pm.entity_id = ug.id AND pm.entity_type = 'g' AND ug.id IN (%s))"
+		subQuery = fmt.Sprintf(tpl, subQuery, strings.TrimSpace(strings.Join(elems, ", ")))
+	}
+
+	return qs.FilterRaw("project_id", fmt.Sprintf("IN (%s)", subQuery))
+}
+
+func isTrue(i interface{}) bool {
+	switch value := i.(type) {
+	case bool:
+		return value
+	case string:
+		v := strings.ToLower(value)
+		return v == "true" || v == "1"
+	default:
+		return false
+	}
+}
+
+func escape(str string) string {
+	// TODO: remove this function when resolve the cycle import between lib/orm, common/dao and common/models.
+	// We need to move the function to registry the database from common/dao to lib/database,
+	// then lib/orm no need to depend the PrepareTestForPostgresSQL method in the common/dao
+	str = strings.Replace(str, `\`, `\\`, -1)
+	str = strings.Replace(str, `%`, `\%`, -1)
+	str = strings.Replace(str, `_`, `\_`, -1)
+	return str
 }
 
 // ProjectQueryParam can be used to set query parameters when listing projects.
@@ -118,19 +201,50 @@ func isTrue(value string) bool {
 // List projects which user1 is member of: query := &QueryParam{Member:&Member{Name:"user1"}}
 // List projects which user1 is the project admin : query := &QueryParam{Member:&Member{Name:"user1",Role:1}}
 type ProjectQueryParam struct {
-	Name       string       // the name of project
-	Owner      string       // the username of project owner
-	Public     *bool        // the project is public or not, can be ture, false and nil
+	Name       string // the name of project
+	Owner      string // the username of project owner
+	Public     *bool  // the project is public or not, can be ture, false and nil
+	RegistryID int64
 	Member     *MemberQuery // the member of project
 	Pagination *Pagination  // pagination information
 	ProjectIDs []int64      // project ID list
 }
 
+// ToQuery returns q.Query from param
+func (param *ProjectQueryParam) ToQuery() *q.Query {
+	kw := q.KeyWords{}
+	if param.Name != "" {
+		kw["name"] = q.FuzzyMatchValue{Value: param.Name}
+	}
+	if param.Owner != "" {
+		kw["owner"] = param.Owner
+	}
+	if param.Public != nil {
+		kw["public"] = *param.Public
+	}
+	if param.RegistryID != 0 {
+		kw["registry_id"] = param.RegistryID
+	}
+	if len(param.ProjectIDs) > 0 {
+		kw["project_id__in"] = param.ProjectIDs
+	}
+	if param.Member != nil {
+		kw["member"] = param.Member
+	}
+
+	query := q.New(kw)
+	if param.Pagination != nil {
+		query.PageNumber = param.Pagination.Page
+		query.PageSize = param.Pagination.Size
+	}
+	return query
+}
+
 // MemberQuery filter by member's username and role
 type MemberQuery struct {
-	Name      string       // the username of member
-	Role      int          // the role of the member has to the project
-	GroupList []*UserGroup // the group list of current user
+	Name     string // the username of member
+	Role     int    // the role of the member has to the project
+	GroupIDs []int  // the group ID of current user belongs to
 }
 
 // Pagination ...
@@ -154,9 +268,13 @@ type BaseProjectCollection struct {
 
 // ProjectRequest holds informations that need for creating project API
 type ProjectRequest struct {
-	Name     string            `json:"project_name"`
-	Public   *int              `json:"public"` // deprecated, reserved for project creation in replication
-	Metadata map[string]string `json:"metadata"`
+	Name         string            `json:"project_name"`
+	Public       *int              `json:"public"` // deprecated, reserved for project creation in replication
+	Metadata     map[string]string `json:"metadata"`
+	CVEAllowlist CVEAllowlist      `json:"cve_allowlist"`
+
+	StorageLimit *int64 `json:"storage_limit,omitempty"`
+	RegistryID   int64  `json:"registry_id"`
 }
 
 // ProjectQueryResult ...
@@ -168,4 +286,25 @@ type ProjectQueryResult struct {
 // TableName is required by beego orm to map Project to table project
 func (p *Project) TableName() string {
 	return ProjectTable
+}
+
+// QuotaSummary ...
+type QuotaSummary struct {
+	Hard types.ResourceList `json:"hard"`
+	Used types.ResourceList `json:"used"`
+}
+
+// ProjectSummary ...
+type ProjectSummary struct {
+	RepoCount  int64  `json:"repo_count"`
+	ChartCount uint64 `json:"chart_count"`
+
+	ProjectAdminCount int64 `json:"project_admin_count"`
+	MaintainerCount   int64 `json:"maintainer_count"`
+	DeveloperCount    int64 `json:"developer_count"`
+	GuestCount        int64 `json:"guest_count"`
+	LimitedGuestCount int64 `json:"limited_guest_count"`
+
+	Quota    *QuotaSummary   `json:"quota,omitempty"`
+	Registry *model.Registry `json:"registry"`
 }

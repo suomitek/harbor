@@ -17,22 +17,26 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/goharbor/harbor/src/common/dao/group"
+
 	"github.com/goharbor/harbor/src/common"
 	"github.com/goharbor/harbor/src/common/dao"
 	"github.com/goharbor/harbor/src/common/models"
 	"github.com/goharbor/harbor/src/common/utils"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/oidc"
 	"github.com/goharbor/harbor/src/core/api"
 	"github.com/goharbor/harbor/src/core/config"
-	"github.com/pkg/errors"
-	"net/http"
-	"strings"
+	"github.com/goharbor/harbor/src/lib/errors"
+	"github.com/goharbor/harbor/src/lib/log"
 )
 
 const tokenKey = "oidc_token"
 const stateKey = "oidc_state"
 const userInfoKey = "oidc_user_info"
+const oidcUserComment = "Onboarded via OIDC provider"
 
 // OIDCController handles requests for OIDC login, callback and user onboard
 type OIDCController struct {
@@ -43,17 +47,11 @@ type onboardReq struct {
 	Username string `json:"username"`
 }
 
-type oidcUserData struct {
-	Issuer   string `json:"iss"`
-	Subject  string `json:"sub"`
-	Username string `json:"name"`
-	Email    string `json:"email"`
-}
-
 // Prepare include public code path for call request handler of OIDCController
 func (oc *OIDCController) Prepare() {
 	if mode, _ := config.AuthMode(); mode != common.OIDCAuth {
-		oc.CustomAbort(http.StatusPreconditionFailed, fmt.Sprintf("Auth Mode: %s is not OIDC based.", mode))
+		oc.SendPreconditionFailedError(fmt.Errorf("auth mode: %s is not OIDC based", mode))
+		return
 	}
 }
 
@@ -62,10 +60,11 @@ func (oc *OIDCController) RedirectLogin() {
 	state := utils.GenerateRandomString()
 	url, err := oidc.AuthCodeURL(state)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		oc.SendInternalServerError(err)
 		return
 	}
 	oc.SetSession(stateKey, state)
+	log.Debugf("State dumped to session: %s", state)
 	// Force to use the func 'Redirect' of beego.Controller
 	oc.Controller.Redirect(url, http.StatusFound)
 }
@@ -74,120 +73,193 @@ func (oc *OIDCController) RedirectLogin() {
 // kick off onboard if needed.
 func (oc *OIDCController) Callback() {
 	if oc.Ctx.Request.URL.Query().Get("state") != oc.GetSession(stateKey) {
-		oc.RenderError(http.StatusBadRequest, "State mismatch.")
+		log.Errorf("State mismatch, in session: %s, in url: %s", oc.GetSession(stateKey),
+			oc.Ctx.Request.URL.Query().Get("state"))
+		oc.SendBadRequestError(errors.New("State mismatch"))
 		return
 	}
+
+	errorCode := oc.Ctx.Request.URL.Query().Get("error")
+	if errorCode != "" {
+		errorDescription := oc.Ctx.Request.URL.Query().Get("error_description")
+		log.Errorf("OIDC callback returned error: %s - %s", errorCode, errorDescription)
+		oc.SendBadRequestError(errors.Errorf("OIDC callback returned error: %s - %s", errorCode, errorDescription))
+		return
+	}
+
 	code := oc.Ctx.Request.URL.Query().Get("code")
 	ctx := oc.Ctx.Request.Context()
 	token, err := oidc.ExchangeToken(ctx, code)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		log.Errorf("Failed to exchange token, error: %v", err)
+		// Return a 4xx error so user can see the details in case it's due to misconfiguration.
+		oc.SendBadRequestError(err)
 		return
 	}
-	idToken, err := oidc.VerifyToken(ctx, token.IDToken)
+	_, err = oidc.VerifyToken(ctx, token.RawIDToken)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		oc.SendInternalServerError(err)
 		return
 	}
-	d := &oidcUserData{}
-	err = idToken.Claims(d)
+	info, err := oidc.UserInfoFromToken(ctx, token)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		oc.SendInternalServerError(err)
 		return
 	}
-	ouDataStr, err := json.Marshal(d)
+	ouDataStr, err := json.Marshal(info)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		oc.SendInternalServerError(err)
 		return
 	}
-	u, err := dao.GetUserBySubIss(d.Subject, d.Issuer)
+	u, err := dao.GetUserBySubIss(info.Subject, info.Issuer)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		oc.SendInternalServerError(err)
 		return
 	}
 	tokenBytes, err := json.Marshal(token)
 	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+		oc.SendInternalServerError(err)
 		return
 	}
 	oc.SetSession(tokenKey, tokenBytes)
 
-	if u == nil {
-		oc.SetSession(userInfoKey, string(ouDataStr))
-		oc.Controller.Redirect("/oidc-onboard", http.StatusFound)
-	} else {
-		oc.SetSession(userKey, *u)
-		oc.Controller.Redirect("/", http.StatusFound)
+	oidcSettings, err := config.OIDCSetting()
+	if err != nil {
+		oc.SendInternalServerError(err)
+		return
 	}
+
+	if u == nil {
+		// Recover the username from d.Username by default
+		username := info.Username
+
+		// Fix blanks in username
+		username = strings.Replace(username, " ", "_", -1)
+
+		// If automatic onboard is enabled, skip the onboard page
+		if oidcSettings.AutoOnboard {
+			log.Debug("Doing automatic onboarding\n")
+			user, onboarded := userOnboard(oc, info, username, tokenBytes)
+			if onboarded == false {
+				log.Error("User not onboarded\n")
+				return
+			}
+			log.Debug("User automatically onboarded\n")
+			u = user
+		} else {
+			oc.SetSession(userInfoKey, string(ouDataStr))
+			oc.Controller.Redirect(fmt.Sprintf("/oidc-onboard?username=%s", username), http.StatusFound)
+			// Once redirected, no further actions are done
+			return
+		}
+	}
+
+	gids, err := group.PopulateGroup(models.UserGroupsFromName(info.Groups, common.OIDCGroupType))
+	if err != nil {
+		log.Warningf("Failed to populate groups, error: %v, user will have empty group list, username: %s", err, info.Username)
+	}
+	u.GroupIDs = gids
+	oidcUser, err := dao.GetOIDCUserByUserID(u.UserID)
+	if err != nil {
+		oc.SendInternalServerError(err)
+		return
+	}
+	_, t, err := secretAndToken(tokenBytes)
+	oidcUser.Token = t
+	if err := dao.UpdateOIDCUser(oidcUser); err != nil {
+		oc.SendInternalServerError(err)
+		return
+	}
+	oc.PopulateUserSession(*u)
+	oc.Controller.Redirect("/", http.StatusFound)
 
 }
 
-// Onboard handles the request to onboard an user authenticated via OIDC provider
+func userOnboard(oc *OIDCController, info *oidc.UserInfo, username string, tokenBytes []byte) (*models.User, bool) {
+	s, t, err := secretAndToken(tokenBytes)
+	if err != nil {
+		oc.SendInternalServerError(err)
+		return nil, false
+	}
+
+	gids, err := group.PopulateGroup(models.UserGroupsFromName(info.Groups, common.OIDCGroupType))
+	if err != nil {
+		log.Warningf("Failed to populate group user will have empty group list. username: %s", username)
+	}
+
+	oidcUser := models.OIDCUser{
+		SubIss: info.Subject + info.Issuer,
+		Secret: s,
+		Token:  t,
+	}
+
+	user := models.User{
+		Username:     username,
+		Realname:     username,
+		Email:        info.Email,
+		GroupIDs:     gids,
+		OIDCUserMeta: &oidcUser,
+		Comment:      oidcUserComment,
+	}
+
+	log.Debugf("User created: %+v\n", user)
+
+	err = dao.OnBoardOIDCUser(&user)
+	if err != nil {
+		if strings.Contains(err.Error(), dao.ErrDupUser.Error()) {
+			oc.RenderError(http.StatusConflict, "Conflict, the user with same username or email has been onboarded.")
+			return nil, false
+		}
+
+		oc.SendInternalServerError(err)
+		return nil, false
+	}
+
+	return &user, true
+}
+
+// Onboard handles the request to onboard a user authenticated via OIDC provider
 func (oc *OIDCController) Onboard() {
 	u := &onboardReq{}
-	oc.DecodeJSONReq(u)
+	if err := oc.DecodeJSONReq(u); err != nil {
+		oc.SendBadRequestError(err)
+		return
+	}
 	username := u.Username
 	if utils.IsIllegalLength(username, 1, 255) {
-		oc.RenderFormatedError(http.StatusBadRequest, errors.New("username with illegal length"))
+		oc.SendBadRequestError(errors.New("username with illegal length"))
 		return
 	}
 	if utils.IsContainIllegalChar(username, []string{",", "~", "#", "$", "%"}) {
-		oc.RenderFormatedError(http.StatusBadRequest, errors.New("username contains illegal characters"))
+		oc.SendBadRequestError(errors.New("username contains illegal characters"))
 		return
 	}
 
 	userInfoStr, ok := oc.GetSession(userInfoKey).(string)
 	if !ok {
-		oc.RenderError(http.StatusBadRequest, "Failed to get OIDC user info from session")
+		oc.SendBadRequestError(errors.New("Failed to get OIDC user info from session"))
 		return
 	}
 	log.Debugf("User info string: %s\n", userInfoStr)
 	tb, ok := oc.GetSession(tokenKey).([]byte)
 	if !ok {
-		oc.RenderError(http.StatusBadRequest, "Failed to get OIDC token from session")
+		oc.SendBadRequestError(errors.New("Failed to get OIDC token from session"))
 		return
-	}
-	s, t, err := secretAndToken(tb)
-	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
-		return
-	}
-	d := &oidcUserData{}
-	err = json.Unmarshal([]byte(userInfoStr), &d)
-	if err != nil {
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
-		return
-	}
-	oidcUser := models.OIDCUser{
-		SubIss: d.Subject + d.Issuer,
-		Secret: s,
-		Token:  t,
 	}
 
-	email := d.Email
-	if email == "" {
-		email = utils.GenerateRandomString() + "@harbor.com"
-	}
-	user := models.User{
-		Username:     username,
-		Email:        email,
-		OIDCUserMeta: &oidcUser,
+	d := &oidc.UserInfo{}
+	err := json.Unmarshal([]byte(userInfoStr), &d)
+	if err != nil {
+		oc.SendInternalServerError(err)
+		return
 	}
 
-	err = dao.OnBoardOIDCUser(&user)
-	if err != nil {
-		if strings.Contains(err.Error(), dao.ErrDupUser.Error()) {
-			oc.RenderError(http.StatusConflict, "Duplicate username")
-			return
-		}
-		oc.RenderFormatedError(http.StatusInternalServerError, err)
+	if user, onboarded := userOnboard(oc, d, username, tb); onboarded {
+		user.OIDCUserMeta = nil
 		oc.DelSession(userInfoKey)
-		return
+		oc.PopulateUserSession(*user)
 	}
 
-	user.OIDCUserMeta = nil
-	oc.SetSession(userKey, user)
-	oc.DelSession(userInfoKey)
 }
 
 func secretAndToken(tokenBytes []byte) (string, string, error) {

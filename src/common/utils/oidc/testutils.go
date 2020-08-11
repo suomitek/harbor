@@ -1,6 +1,10 @@
 package oidc
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"github.com/goharbor/harbor/src/common/models"
+)
 import "errors"
 
 // This is for testing only
@@ -8,15 +12,11 @@ type fakeVerifier struct {
 	secret string
 }
 
-func (fv *fakeVerifier) SetSecret(uid int, s string, t *Token) error {
-	return nil
-}
-
-func (fv *fakeVerifier) VerifySecret(ctx context.Context, userID int, secret string) error {
+func (fv *fakeVerifier) VerifySecret(ctx context.Context, name string, secret string) (*models.User, error) {
 	if secret != fv.secret {
-		return verifyError(errors.New("mismatch"))
+		return nil, verifyError(errors.New("mismatch"))
 	}
-	return nil
+	return &models.User{UserID: 1, Username: name, Email: fmt.Sprintf("%s@test.local", name)}, nil
 }
 
 // SetHardcodeVerifierForTest overwrite the default secret manager for testing.

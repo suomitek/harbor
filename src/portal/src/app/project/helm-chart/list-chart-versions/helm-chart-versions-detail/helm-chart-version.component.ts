@@ -8,45 +8,39 @@ import {
   Output,
   EventEmitter
 } from "@angular/core";
-import { Observable, forkJoin } from "rxjs";
-import { finalize, map } from "rxjs/operators";
-
+import { Observable, forkJoin, throwError as observableThrowError } from "rxjs";
+import { finalize, map, catchError } from "rxjs/operators";
 import { TranslateService } from "@ngx-translate/core";
-import { State,
-  SystemInfo,
-  Label,
-  ErrorHandler,
-  DEFAULT_PAGE_SIZE,
-  downloadFile,
-  SystemInfoService,
-  LabelService,
-  OperateInfo,
-  OperationState,
-  operateChanges,
-  OperationService,
-  UserPermissionService,
-  USERSTATICPERMISSION } from "@harbor/ui";
-
 import { HelmChartVersion, HelmChartMaintainer } from "../../helm-chart.interface.service";
 import { HelmChartService } from "../../helm-chart.service";
-import { ConfirmationAcknowledgement } from "./../../../../shared/confirmation-dialog/confirmation-state-message";
-import { ConfirmationDialogComponent } from "./../../../../shared/confirmation-dialog/confirmation-dialog.component";
-import { ConfirmationMessage } from "./../../../../shared/confirmation-dialog/confirmation-message";
-
+import { ConfirmationAcknowledgement } from "../../../../shared/confirmation-dialog/confirmation-state-message";
+import { ConfirmationDialogComponent } from "../../../../shared/confirmation-dialog/confirmation-dialog.component";
+import { ConfirmationMessage } from "../../../../shared/confirmation-dialog/confirmation-message";
 import {
   ConfirmationButtons,
   ConfirmationTargets,
   ConfirmationState,
   DefaultHelmIcon,
   ResourceType,
-  Roles
 } from "../../../../shared/shared.const";
+import {
+  Label,
+  LabelService,
+  State,
+  SystemInfo,
+  SystemInfoService,
+  UserPermissionService, USERSTATICPERMISSION
+} from "../../../../../lib/services";
+import { DEFAULT_PAGE_SIZE, downloadFile } from "../../../../../lib/utils/utils";
+import { ErrorHandler } from "../../../../../lib/utils/error-handler";
+import { OperationService } from "../../../../../lib/components/operation/operation.service";
+import { operateChanges, OperateInfo, OperationState } from "../../../../../lib/components/operation/operate";
+import { errorHandler as errorHandlerFn } from "../../../../../lib/utils/shared/shared.utils";
 
 @Component({
   selector: "hbr-helm-chart-version",
   templateUrl: "./helm-chart-version.component.html",
   styleUrls: ["./helm-chart-version.component.scss"],
-  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ChartVersionComponent implements OnInit {
   signedCon: { [key: string]: any | string[] } = {};
@@ -82,7 +76,7 @@ export class ChartVersionComponent implements OnInit {
 
   addLabelHeaders = 'HELM_CHART.ADD_LABEL_TO_CHART_VERSION';
 
-  @ViewChild("confirmationDialog")
+  @ViewChild("confirmationDialog", {static: false})
   confirmationDialog: ConfirmationDialogComponent;
   hasAddRemoveHelmChartVersionPermission: boolean;
   hasDownloadHelmChartVersionPermission: boolean;
@@ -93,8 +87,8 @@ export class ChartVersionComponent implements OnInit {
     private helmChartService: HelmChartService,
     private resrouceLabelService: LabelService,
     public userPermissionService: UserPermissionService,
-    private cdr: ChangeDetectorRef,
     private operationService: OperationService,
+    private translateService: TranslateService,
   ) { }
 
   public get registryUrl(): string {
@@ -132,8 +126,6 @@ export class ChartVersionComponent implements OnInit {
       .pipe(finalize(() => {
         this.selectedRows = [];
         this.loading = false;
-        let hnd = setInterval(() => this.cdr.markForCheck(), 100);
-        setTimeout(() => clearInterval(hnd), 2000);
       }))
       .subscribe(
         versions => {
@@ -174,8 +166,14 @@ export class ChartVersionComponent implements OnInit {
     return this.helmChartService
       .deleteChartVersion(this.projectName, this.chartName, version.version)
       .pipe(map(
-        () => operateChanges(operateMsg, OperationState.success),
-        err => operateChanges(operateMsg, OperationState.failure, err)
+        () => operateChanges(operateMsg, OperationState.success)),
+        catchError( error => {
+          const message = errorHandlerFn(error);
+          this.translateService.get(message).subscribe(res =>
+            operateChanges(operateMsg, OperationState.failure, res)
+          );
+          return observableThrowError(error);
+        }
       ));
   }
 
@@ -193,6 +191,8 @@ export class ChartVersionComponent implements OnInit {
       if (totalCount === successCount) {
         this.backEvt.emit();
       }
+    }, error => {
+      this.errorHandler.error(error);
     });
   }
 
@@ -273,7 +273,10 @@ export class ChartVersionComponent implements OnInit {
     this.openVersionDeleteModal([version]);
   }
 
-  openVersionDeleteModal(versions: HelmChartVersion[]) {
+  openVersionDeleteModal(versions?: HelmChartVersion[]) {
+    if (!versions) {
+      versions = this.selectedRows;
+    }
     let versionNames = versions.map(v => v.version).join(",");
     let message = new ConfirmationMessage(
       "HELM_CHART.DELETE_CHART_VERSION_TITLE",
@@ -284,8 +287,6 @@ export class ChartVersionComponent implements OnInit {
       ConfirmationButtons.DELETE_CANCEL
     );
     this.confirmationDialog.open(message);
-    let hnd = setInterval(() => this.cdr.markForCheck(), 100);
-    setTimeout(() => clearInterval(hnd), 2000);
   }
 
   confirmDeletion(message: ConfirmationAcknowledgement) {
@@ -324,8 +325,6 @@ export class ChartVersionComponent implements OnInit {
       .subscribe(labels => {
         let versionIdx = this.chartVersions.findIndex(v => v.name === version.name);
         this.chartVersions[versionIdx].labels = labels;
-        let hnd = setInterval(() => this.cdr.markForCheck(), 200);
-        setTimeout(() => clearInterval(hnd), 5000);
       });
   }
 

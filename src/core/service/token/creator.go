@@ -24,10 +24,9 @@ import (
 	"github.com/goharbor/harbor/src/common/models"
 	"github.com/goharbor/harbor/src/common/rbac"
 	"github.com/goharbor/harbor/src/common/security"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/core/config"
-	"github.com/goharbor/harbor/src/core/filter"
 	"github.com/goharbor/harbor/src/core/promgr"
+	"github.com/goharbor/harbor/src/lib/log"
 )
 
 var creatorMap map[string]Creator
@@ -162,21 +161,23 @@ func (rep repositoryFilter) filter(ctx security.Context, pm promgr.ProjectManage
 	projectName := img.namespace
 	permission := ""
 
-	exist, err := pm.Exists(projectName)
+	project, err := pm.Get(projectName)
 	if err != nil {
 		return err
 	}
-	if !exist {
+	if project == nil {
 		log.Debugf("project %s does not exist, set empty permission", projectName)
 		a.Actions = []string{}
 		return nil
 	}
 
-	resource := rbac.NewProjectNamespace(projectName).Resource(rbac.ResourceRepository)
+	resource := rbac.NewProjectNamespace(project.ProjectID).Resource(rbac.ResourceRepository)
 	if ctx.Can(rbac.ActionPush, resource) && ctx.Can(rbac.ActionPull, resource) {
 		permission = "RWM"
 	} else if ctx.Can(rbac.ActionPush, resource) {
 		permission = "RW"
+	} else if ctx.Can(rbac.ActionScannerPull, resource) {
+		permission = "RS"
 	} else if ctx.Can(rbac.ActionPull, resource) {
 		permission = "R"
 	}
@@ -201,15 +202,12 @@ func (g generalCreator) Create(r *http.Request) (*models.Token, error) {
 	scopes := parseScopes(r.URL)
 	log.Debugf("scopes: %v", scopes)
 
-	ctx, err := filter.GetSecurityContext(r)
-	if err != nil {
+	ctx, ok := security.FromContext(r.Context())
+	if !ok {
 		return nil, fmt.Errorf("failed to  get security context from request")
 	}
 
-	pm, err := filter.GetProjectManager(r)
-	if err != nil {
-		return nil, fmt.Errorf("failed to  get project manager from request")
-	}
+	pm := config.GlobalProjectMgr
 
 	// for docker login
 	if !ctx.IsAuthenticated() {

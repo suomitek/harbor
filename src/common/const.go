@@ -14,6 +14,8 @@
 
 package common
 
+type contextKey string
+
 // const variables
 const (
 	DBAuth              = "db_auth"
@@ -30,7 +32,8 @@ const (
 	RoleProjectAdmin = 1
 	RoleDeveloper    = 2
 	RoleGuest        = 3
-	RoleMaster       = 4
+	RoleMaintainer   = 4
+	RoleLimitedGuest = 5
 
 	LabelLevelSystem  = "s"
 	LabelLevelUser    = "u"
@@ -51,8 +54,11 @@ const (
 	PostGreSQLPassword               = "postgresql_password"
 	PostGreSQLDatabase               = "postgresql_database"
 	PostGreSQLSSLMode                = "postgresql_sslmode"
+	PostGreSQLMaxIdleConns           = "postgresql_max_idle_conns"
+	PostGreSQLMaxOpenConns           = "postgresql_max_open_conns"
 	SelfRegistration                 = "self_registration"
 	CoreURL                          = "core_url"
+	CoreLocalURL                     = "core_local_url"
 	JobServiceURL                    = "jobservice_url"
 	LDAPURL                          = "ldap_url"
 	LDAPSearchDN                     = "ldap_search_dn"
@@ -80,18 +86,11 @@ const (
 	ProjectCreationRestriction       = "project_creation_restriction"
 	MaxJobWorkers                    = "max_job_workers"
 	TokenExpiration                  = "token_expiration"
-	CfgExpiration                    = "cfg_expiration"
 	AdminInitialPassword             = "admin_initial_password"
-	AdmiralEndpoint                  = "admiral_url"
 	WithNotary                       = "with_notary"
 	WithClair                        = "with_clair"
+	WithTrivy                        = "with_trivy"
 	ScanAllPolicy                    = "scan_all_policy"
-	ClairDBPassword                  = "clair_db_password"
-	ClairDBHost                      = "clair_db_host"
-	ClairDBPort                      = "clair_db_port"
-	ClairDB                          = "clair_db"
-	ClairDBUsername                  = "clair_db_username"
-	ClairDBSSLMode                   = "clair_db_sslmode"
 	UAAEndpoint                      = "uaa_endpoint"
 	UAAClientID                      = "uaa_client_id"
 	UAAClientSecret                  = "uaa_client_secret"
@@ -99,35 +98,41 @@ const (
 	HTTPAuthProxyEndpoint            = "http_authproxy_endpoint"
 	HTTPAuthProxyTokenReviewEndpoint = "http_authproxy_tokenreview_endpoint"
 	HTTPAuthProxyVerifyCert          = "http_authproxy_verify_cert"
-	HTTPAuthProxyAlwaysOnboard       = "http_authproxy_always_onboard"
+	HTTPAuthProxySkipSearch          = "http_authproxy_skip_search"
+	HTTPAuthProxyServerCertificate   = "http_authproxy_server_certificate"
 	OIDCName                         = "oidc_name"
 	OIDCEndpoint                     = "oidc_endpoint"
 	OIDCCLientID                     = "oidc_client_id"
 	OIDCClientSecret                 = "oidc_client_secret"
 	OIDCVerifyCert                   = "oidc_verify_cert"
+	OIDCGroupsClaim                  = "oidc_groups_claim"
+	OIDCAutoOnboard                  = "oidc_auto_onboard"
 	OIDCScope                        = "oidc_scope"
+	OIDCUserClaim                    = "oidc_user_claim"
 
-	DefaultClairEndpoint              = "http://clair:6060"
 	CfgDriverDB                       = "db"
 	NewHarborAdminName                = "admin@harbor.local"
 	RegistryStorageProviderName       = "registry_storage_provider_name"
+	RegistryControllerURL             = "registry_controller_url"
 	UserMember                        = "u"
 	GroupMember                       = "g"
 	ReadOnly                          = "read_only"
-	ClairURL                          = "clair_url"
+	ClairAdapterURL                   = "clair_adapter_url"
+	TrivyAdapterURL                   = "trivy_adapter_url"
 	NotaryURL                         = "notary_url"
 	DefaultCoreEndpoint               = "http://core:8080"
 	DefaultNotaryEndpoint             = "http://notary-server:4443"
-	LdapGroupType                     = 1
-	LdapGroupAdminDn                  = "ldap_group_admin_dn"
+	LDAPGroupType                     = 1
+	HTTPGroupType                     = 2
+	OIDCGroupType                     = 3
+	LDAPGroupAdminDn                  = "ldap_group_admin_dn"
 	LDAPGroupMembershipAttribute      = "ldap_group_membership_attribute"
 	DefaultRegistryControllerEndpoint = "http://registryctl:8080"
 	WithChartMuseum                   = "with_chartmuseum"
 	ChartRepoURL                      = "chart_repository_url"
 	DefaultChartRepoURL               = "http://chartmuseum:9999"
-	DefaultPortalURL                  = "http://portal"
+	DefaultPortalURL                  = "http://portal:8080"
 	DefaultRegistryCtlURL             = "http://registryctl:8080"
-	DefaultClairHealthCheckServerURL  = "http://clair:6061"
 	// Use this prefix to distinguish harbor user, the prefix contains a special character($), so it cannot be registered as a harbor user.
 	RobotPrefix = "robot$"
 	// Use this prefix to index user who tries to login with web hook token.
@@ -136,4 +141,19 @@ const (
 	RobotTokenDuration      = "robot_token_duration"
 
 	OIDCCallbackPath = "/c/oidc/callback"
+	OIDCLoginPath    = "/c/oidc/login"
+
+	ChartUploadCtxKey   = contextKey("chart_upload_event")
+	ChartDownloadCtxKey = contextKey("chart_download_event")
+
+	// Global notification enable configuration
+	NotificationEnable = "notification_enable"
+
+	// Quota setting items for project
+	QuotaPerProjectEnable = "quota_per_project_enable"
+	CountPerProject       = "count_per_project"
+	StoragePerProject     = "storage_per_project"
+
+	// DefaultGCTimeWindowHours is the reserve blob time window used by GC, default is 2 hours
+	DefaultGCTimeWindowHours = int64(2)
 )

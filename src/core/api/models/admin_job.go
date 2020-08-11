@@ -17,13 +17,16 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/astaxie/beego/validation"
 	"github.com/goharbor/harbor/src/common/job"
 	"github.com/goharbor/harbor/src/common/job/models"
-	"github.com/goharbor/harbor/src/common/utils/log"
+	common_models "github.com/goharbor/harbor/src/common/models"
+	common_utils "github.com/goharbor/harbor/src/common/utils"
 	"github.com/goharbor/harbor/src/core/config"
+	"github.com/goharbor/harbor/src/lib/log"
 	"github.com/robfig/cron"
 )
 
@@ -70,6 +73,7 @@ type AdminJobRep struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"job_name"`
 	Kind         string    `json:"job_kind"`
+	Parameters   string    `json:"job_parameters"`
 	Status       string    `json:"job_status"`
 	UUID         string    `json:"-"`
 	Deleted      bool      `json:"deleted"`
@@ -110,6 +114,14 @@ func (ar *AdminJobReq) ToJob() *models.JobData {
 		StatusHook: fmt.Sprintf("%s/service/notifications/jobs/adminjob/%d",
 			config.InternalCoreURL(), ar.ID),
 	}
+
+	// Append admin job ID as job parameter
+	if jobData.Parameters == nil {
+		jobData.Parameters = make(models.Parameters)
+	}
+	// As string
+	jobData.Parameters["admin_job_id"] = fmt.Sprintf("%d", ar.ID)
+
 	return jobData
 }
 
@@ -138,4 +150,60 @@ func (ar *AdminJobReq) CronString() string {
 		return ""
 	}
 	return string(str)
+}
+
+// ParamString ...
+func (ar *AdminJobReq) ParamString() string {
+	str, err := json.Marshal(ar.Parameters)
+	if err != nil {
+		log.Debugf("failed to marshal json error, %v", err)
+		return ""
+	}
+	return string(str)
+}
+
+// ConvertSchedule converts different kinds of cron string into one standard for UI to show.
+// in the latest design, it uses {"type":"Daily","cron":"0 0 0 * * *"} as the cron item.
+// As for supporting migration from older version, it needs to convert {"parameter":{"daily_time":0},"type":"daily"}
+// and {"type":"Daily","weekday":0,"offtime":57600} into one standard.
+func ConvertSchedule(cronStr string) (ScheduleParam, error) {
+	if cronStr == "" {
+		return ScheduleParam{}, nil
+	}
+
+	convertedSchedule := ScheduleParam{}
+	convertedSchedule.Type = "custom"
+
+	if strings.Contains(cronStr, "parameter") {
+		scheduleModel := ScanAllPolicy{}
+		if err := json.Unmarshal([]byte(cronStr), &scheduleModel); err != nil {
+			return ScheduleParam{}, err
+		}
+		h, m, s := common_utils.ParseOfftime(int64(scheduleModel.Param["daily_time"].(float64)))
+		cron := fmt.Sprintf("%d %d %d * * *", s, m, h)
+		convertedSchedule.Cron = cron
+		return convertedSchedule, nil
+	} else if strings.Contains(cronStr, "offtime") {
+		scheduleModel := common_models.ScheduleParam{}
+		if err := json.Unmarshal([]byte(cronStr), &scheduleModel); err != nil {
+			return ScheduleParam{}, err
+		}
+		convertedSchedule.Cron = common_models.ParseScheduleParamToCron(&scheduleModel)
+		return convertedSchedule, nil
+	} else if strings.Contains(cronStr, "cron") {
+		scheduleModel := ScheduleParam{}
+		if err := json.Unmarshal([]byte(cronStr), &scheduleModel); err != nil {
+			return ScheduleParam{}, err
+		}
+		return scheduleModel, nil
+	}
+
+	return ScheduleParam{}, fmt.Errorf("unsupported cron format, %s", cronStr)
+}
+
+// ScanAllPolicy is represent the json request and object for scan all policy
+// Only for migrating from the legacy schedule.
+type ScanAllPolicy struct {
+	Type  string                 `json:"type"`
+	Param map[string]interface{} `json:"parameter,omitempty"`
 }

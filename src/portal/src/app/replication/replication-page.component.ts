@@ -13,12 +13,12 @@
 // limitations under the License.
 import { Component, OnInit, ViewChild, AfterViewInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-
 import { SessionService } from "../shared/session.service";
 import { Project } from "../project/project";
-import { ProjectService } from "../project/project.service";
-import { ReplicationComponent, UserPermissionService, USERSTATICPERMISSION, ErrorHandler } from "@harbor/ui";
 import { forkJoin } from 'rxjs';
+import { ReplicationComponent } from "../../lib/components/replication/replication.component";
+import { ProjectService, UserPermissionService, USERSTATICPERMISSION } from "../../lib/services";
+import { ErrorHandler } from "../../lib/utils/error-handler";
 
 @Component({
   selector: 'replication',
@@ -26,7 +26,7 @@ import { forkJoin } from 'rxjs';
 })
 export class ReplicationPageComponent implements OnInit, AfterViewInit {
   projectIdentify: string | number;
-  @ViewChild("replicationView") replicationView: ReplicationComponent;
+  @ViewChild("replicationView", {static: false}) replicationView: ReplicationComponent;
   projectName: string;
   hasCreateReplicationPermission: boolean;
   hasUpdateReplicationPermission: boolean;
@@ -44,7 +44,7 @@ export class ReplicationPageComponent implements OnInit, AfterViewInit {
     this.getReplicationPermissions(this.projectIdentify);
     this.proService.listProjects("", undefined)
       .subscribe(response => {
-        let projects = response.json() as Project[];
+        let projects = response.body as Project[];
         if (projects.length) {
           let project = projects.find(data => data.project_id === this.projectIdentify);
           if (project) {

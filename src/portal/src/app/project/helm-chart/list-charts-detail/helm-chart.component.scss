@@ -1,4 +1,4 @@
-@import "../../../../../lib/src/mixin";
+@import "../../../../lib/mixin";
 $size24:24px;
 $size60:60px;
 
@@ -9,6 +9,7 @@ $size60:60px;
 }
 .chart-tool {
     position: relative;
+    margin-top: 5px;
     .toolbar {
         overflow: hidden;
         .rightPos {
@@ -17,8 +18,7 @@ $size60:60px;
             .filter-divider {
                 display: inline-block;
                 height: 16px;
-                width: 2px;
-                background-color: #ccc;
+                width: 1px;
                 padding-top: 12px;
                 padding-bottom: 12px;
                 position: relative;
@@ -91,22 +91,18 @@ $size60:60px;
 }
 
 clr-modal {
-    .form-group {
-        padding-left: 6rem;
+    .filename-label {
+        padding-top: 9px;
+    }
 
-        .filename-label {
-            padding-top: 9px;
-        }
+    .filename-input {
+        margin-top: 12px;
+        width: 68%;
+    }
 
-        .filename-input {
-            margin-top: 12px;
-            width: 68%;
-        }
-    
-        .file-browser-btn {
-            margin-left: 15px;
-            max-width: 25%;
-        }
+    .file-browser-btn {
+        margin-left: 15px;
+        max-width: 34%;
     }
 }
 
@@ -114,4 +110,26 @@ button {
     clr-icon {
         margin-right: 6px;
     }
+}
+
+.mb-10 {
+    margin-bottom:10px;
+}
+.table-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.center-x {
+    display: flex;
+    justify-content: center;
+    position: absolute;
+    top: 2.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.version-position {
+    position: relative;
 }

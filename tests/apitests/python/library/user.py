@@ -45,7 +45,6 @@ class User(base.Base):
         client = self._get_client(**kwargs)
         data, status_code, _ = client.users_user_id_get_with_http_info(user_id)
         base._assert_status_code(200, status_code)
-        print "data in lib:", data
         return data
 
 
@@ -70,17 +69,16 @@ class User(base.Base):
         base._assert_status_code(200, status_code)
         return user_id
 
-    def update_uesr_profile(self, user_id, email=None, realname=None, comment=None, **kwargs):
+    def update_user_profile(self, user_id, email=None, realname=None, comment=None, **kwargs):
         client = self._get_client(**kwargs)
         user_rofile = swagger_client.UserProfile(email, realname, comment)
         _, status_code, _ = client.users_user_id_put_with_http_info(user_id, user_rofile)
         base._assert_status_code(200, status_code)
         return user_id
 
-    def update_uesr_role_as_sysadmin(self, user_id, IsAdmin, **kwargs):
+    def update_user_role_as_sysadmin(self, user_id, IsAdmin, **kwargs):
         client = self._get_client(**kwargs)
-        has_admin_role = swagger_client.HasAdminRole(IsAdmin)
-        print "has_admin_role:", has_admin_role
-        _, status_code, _ = client.users_user_id_sysadmin_put_with_http_info(user_id, has_admin_role)
+        sysadmin_flag = swagger_client.SysAdminFlag(IsAdmin)
+        _, status_code, _ = client.users_user_id_sysadmin_put_with_http_info(user_id, sysadmin_flag)
         base._assert_status_code(200, status_code)
         return user_id

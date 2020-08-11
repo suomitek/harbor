@@ -11,16 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-import { Component, Input, ViewChild, SimpleChanges, OnChanges } from '@angular/core';
+import { Component, Input, ViewChild, SimpleChanges, OnChanges, OnInit, Output, EventEmitter } from '@angular/core';
 import { NgForm } from '@angular/forms';
 import { Subscription } from "rxjs";
-
-import { Configuration, clone, isEmpty, getChanges, StringValueItem, BoolValueItem } from '@harbor/ui';
 import { MessageHandlerService } from '../../shared/message-handler/message-handler.service';
 import { ConfirmMessageHandler } from '../config.msg.utils';
-import { AppConfigService } from '../../app-config.service';
+import { AppConfigService } from '../../services/app-config.service';
 import { ConfigurationService } from '../config.service';
-import { catchError } from 'rxjs/operators';
+import { Configuration } from "../../../lib/components/config/config";
+import { ErrorHandler } from "../../../lib/utils/error-handler";
+import { errorHandler as errorHandlerFn } from "../../../lib/utils/shared/shared.utils";
+
+import { SystemInfoService } from "../../../lib/services";
+import { clone, isEmpty, getChanges as getChangesFunc } from "../../../lib/utils/utils";
+import { CONFIG_AUTH_MODE } from "../../../lib/entities/shared.const";
 const fakePass = 'aWpLOSYkIzJTTU4wMDkx';
 
 @Component({
@@ -28,23 +32,34 @@ const fakePass = 'aWpLOSYkIzJTTU4wMDkx';
     templateUrl: 'config-auth.component.html',
     styleUrls: ['./config-auth.component.scss', '../config.component.scss']
 })
-export class ConfigurationAuthComponent implements OnChanges {
+export class ConfigurationAuthComponent implements OnChanges, OnInit {
     changeSub: Subscription;
-    testingLDAPOnGoing = false;
+    testingOnGoing = false;
     onGoing = false;
+    redirectUrl: string;
     // tslint:disable-next-line:no-input-rename
     @Input('allConfig') currentConfig: Configuration = new Configuration();
     private originalConfig: Configuration;
-    @ViewChild('authConfigFrom') authForm: NgForm;
+    @ViewChild('authConfigFrom', {static: false}) authForm: NgForm;
+    @Output() refreshAllconfig = new EventEmitter<any>();
 
     constructor(
         private msgHandler: MessageHandlerService,
         private configService: ConfigurationService,
         private appConfigService: AppConfigService,
-        private confirmMessageHandler: ConfirmMessageHandler
+        private confirmMessageHandler: ConfirmMessageHandler,
+        private systemInfo: SystemInfoService,
+        private errorHandler: ErrorHandler,
     ) {
     }
-
+    ngOnInit() {
+        this.getSystemInfo();
+    }
+    getSystemInfo(): void {
+        this.systemInfo.getSystemInfo()
+            .subscribe(systemInfo => (this.redirectUrl = systemInfo.external_url)
+                , error => this.errorHandler.error(error));
+    }
     get checkable() {
         return this.currentConfig &&
             this.currentConfig.self_registration &&
@@ -61,24 +76,26 @@ export class ConfigurationAuthComponent implements OnChanges {
     public get showLdap(): boolean {
         return this.currentConfig &&
             this.currentConfig.auth_mode &&
-            this.currentConfig.auth_mode.value === 'ldap_auth';
+            this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.LDAP_AUTH;
     }
 
     public get showUAA(): boolean {
-        return this.currentConfig && this.currentConfig.auth_mode && this.currentConfig.auth_mode.value === 'uaa_auth';
+        return this.currentConfig && this.currentConfig.auth_mode && this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.UAA_AUTH;
     }
     public get showOIDC(): boolean {
-        return this.currentConfig && this.currentConfig.auth_mode && this.currentConfig.auth_mode.value === 'oidc_auth';
+        return this.currentConfig && this.currentConfig.auth_mode && this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.OIDC_AUTH;
     }
     public get showHttpAuth(): boolean {
-        return this.currentConfig && this.currentConfig.auth_mode && this.currentConfig.auth_mode.value === 'http_auth';
+        return this.currentConfig && this.currentConfig.auth_mode && this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.HTTP_AUTH;
     }
     public get showSelfReg(): boolean {
         if (!this.currentConfig || !this.currentConfig.auth_mode) {
             return true;
         } else {
-            return this.currentConfig.auth_mode.value !== 'ldap_auth' && this.currentConfig.auth_mode.value !== 'uaa_auth'
-                && this.currentConfig.auth_mode.value !== 'http_auth' && this.currentConfig.auth_mode.value !== 'oidc_auth';
+            return this.currentConfig.auth_mode.value !== CONFIG_AUTH_MODE.LDAP_AUTH
+                && this.currentConfig.auth_mode.value !== CONFIG_AUTH_MODE.UAA_AUTH
+                && this.currentConfig.auth_mode.value !== CONFIG_AUTH_MODE.HTTP_AUTH
+                && this.currentConfig.auth_mode.value !== CONFIG_AUTH_MODE.OIDC_AUTH;
         }
     }
 
@@ -94,56 +111,79 @@ export class ConfigurationAuthComponent implements OnChanges {
         this.currentConfig.ldap_verify_cert.value = $event;
     }
 
-    public testLDAPServer(): void {
-        if (this.testingLDAPOnGoing) {
+    public pingTestServer(): void {
+        if (this.testingOnGoing) {
             return; // Should not come here
         }
 
-        let ldapSettings = {};
-        for (let prop in this.currentConfig) {
-            if (prop.startsWith('ldap_')) {
-                ldapSettings[prop] = this.currentConfig[prop].value;
-            }
-        }
+        let settings = {};
+        if (this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.LDAP_AUTH) {
 
-        let allChanges = this.getChanges();
-        let ldapSearchPwd = allChanges['ldap_search_password'];
-        if (ldapSearchPwd) {
-            ldapSettings['ldap_search_password'] = ldapSearchPwd;
-        } else {
-            delete ldapSettings['ldap_search_password'];
-        }
-
-        // Fix: Confirm ldap scope is number
-        ldapSettings['ldap_scope'] = +ldapSettings['ldap_scope'];
-
-        this.testingLDAPOnGoing = true;
-        this.configService.testLDAPServer(ldapSettings)
-            .subscribe(respone => {
-                this.testingLDAPOnGoing = false;
-                this.msgHandler.showSuccess('CONFIG.TEST_LDAP_SUCCESS');
-            }, error => {
-                this.testingLDAPOnGoing = false;
-                let err = error._body;
-                if (!err || !err.trim()) {
-                    err = 'UNKNOWN';
+            for (let prop in this.currentConfig) {
+                if (prop.startsWith('ldap_')) {
+                    settings[prop] = this.currentConfig[prop].value;
                 }
-                this.msgHandler.showError('CONFIG.TEST_LDAP_FAILED', { 'param': err });
-            });
+            }
+
+            let allChanges = this.getChanges();
+            this.testingOnGoing = true;
+            // set password for ldap
+            let ldapSearchPwd = allChanges['ldap_search_password'];
+            if (ldapSearchPwd) {
+                settings['ldap_search_password'] = ldapSearchPwd;
+            } else {
+                delete settings['ldap_search_password'];
+            }
+
+            // Fix: Confirm ldap scope is number
+            settings['ldap_scope'] = +settings['ldap_scope'];
+
+            this.configService.testLDAPServer(settings)
+                .subscribe(respone => {
+                    this.testingOnGoing = false;
+                    this.msgHandler.showSuccess('CONFIG.TEST_LDAP_SUCCESS');
+                }, error => {
+                    this.testingOnGoing = false;
+                    let err = errorHandlerFn(error);
+                    if (!err || !err.trim()) {
+                        err = 'UNKNOWN';
+                    }
+                    this.msgHandler.showError('CONFIG.TEST_LDAP_FAILED', { 'param': err });
+                });
+        } else {
+            for (let prop in this.currentConfig) {
+                if (prop === 'oidc_endpoint') {
+                    settings['url'] = this.currentConfig[prop].value;
+                } else if (prop === 'oidc_verify_cert') {
+                    settings['verify_cert'] = this.currentConfig[prop].value;
+                }
+            }
+            this.testingOnGoing = true;
+            this.configService.testOIDCServer(settings)
+                .subscribe(respone => {
+                    this.testingOnGoing = false;
+                    this.msgHandler.showSuccess('CONFIG.TEST_OIDC_SUCCESS');
+                }, error => {
+                    this.testingOnGoing = false;
+                    this.errorHandler.error(error);
+                });
+        }
+
     }
 
-    public get showLdapServerBtn(): boolean {
+    public get showTestingServerBtn(): boolean {
         return this.currentConfig.auth_mode &&
-            this.currentConfig.auth_mode.value === 'ldap_auth';
+            (this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.LDAP_AUTH
+                || this.currentConfig.auth_mode.value === CONFIG_AUTH_MODE.OIDC_AUTH);
     }
 
-    public isLDAPConfigValid(): boolean {
+    public isConfigValidForTesting(): boolean {
         return this.isValid() &&
-            !this.testingLDAPOnGoing;
+            !this.testingOnGoing;
     }
 
     public getChanges() {
-        let allChanges = getChanges(this.originalConfig, this.currentConfig);
+        let allChanges = getChangesFunc(this.originalConfig, this.currentConfig);
         let changes = {};
         for (let prop in allChanges) {
             if (prop.startsWith('ldap_')
@@ -160,8 +200,8 @@ export class ConfigurationAuthComponent implements OnChanges {
         return changes;
     }
 
-    public get hideLDAPTestingSpinner(): boolean {
-        return !this.testingLDAPOnGoing || !this.showLdapServerBtn;
+    public get hideTestingSpinner(): boolean {
+        return !this.testingOnGoing || !this.showTestingServerBtn;
     }
 
     disabled(prop: any): boolean {
@@ -171,7 +211,8 @@ export class ConfigurationAuthComponent implements OnChanges {
     handleOnChange($event: any): void {
         if ($event && $event.target && $event.target["value"]) {
             let authMode = $event.target["value"];
-            if (authMode === 'ldap_auth' || authMode === 'uaa_auth' || authMode === 'http_auth' || authMode === 'oidc_auth') {
+            if (authMode === CONFIG_AUTH_MODE.LDAP_AUTH || authMode === CONFIG_AUTH_MODE.UAA_AUTH || authMode === CONFIG_AUTH_MODE.HTTP_AUTH
+                || authMode === CONFIG_AUTH_MODE.OIDC_AUTH) {
                 if (this.currentConfig.self_registration.value) {
                     this.currentConfig.self_registration.value = false; // unselect
                 }
@@ -192,7 +233,7 @@ export class ConfigurationAuthComponent implements OnChanges {
             this.configService.saveConfiguration(changes)
                 .subscribe(response => {
                     this.onGoing = false;
-                    this.retrieveConfig();
+                    this.refreshAllconfig.emit();
                     // Reload bootstrap option
                     this.appConfigService.load().subscribe(() => { }
                         , error => console.error('Failed to reload bootstrap option with error: ', error));
@@ -205,25 +246,6 @@ export class ConfigurationAuthComponent implements OnChanges {
             // Inprop situation, should not come here
             console.error('Save abort because nothing changed');
         }
-    }
-
-    retrieveConfig(): void {
-        this.onGoing = true;
-        this.configService.getConfiguration()
-            .subscribe((configurations: Configuration) => {
-                this.onGoing = false;
-
-                // Add two password fields
-                configurations.ldap_search_password = new StringValueItem(fakePass, true);
-                configurations.uaa_client_secret = new StringValueItem(fakePass, true);
-                configurations.oidc_client_secret = new StringValueItem(fakePass, true);
-                this.currentConfig = configurations;
-                // Keep the original copy of the data
-                this.originalConfig = clone(configurations);
-            }, error => {
-                this.onGoing = false;
-                this.msgHandler.handleError(error);
-            });
     }
 
     /**

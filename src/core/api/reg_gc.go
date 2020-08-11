@@ -15,7 +15,8 @@
 package api
 
 import (
-	"fmt"
+	"errors"
+	"github.com/goharbor/harbor/src/core/config"
 	"net/http"
 	"os"
 	"strconv"
@@ -33,11 +34,11 @@ type GCAPI struct {
 func (gc *GCAPI) Prepare() {
 	gc.BaseController.Prepare()
 	if !gc.SecurityCtx.IsAuthenticated() {
-		gc.HandleUnauthorized()
+		gc.SendUnAuthorizedError(errors.New("UnAuthorized"))
 		return
 	}
 	if !gc.SecurityCtx.IsSysAdmin() {
-		gc.HandleForbidden(gc.SecurityCtx.GetUsername())
+		gc.SendForbiddenError(errors.New(gc.SecurityCtx.GetUsername()))
 		return
 	}
 }
@@ -48,20 +49,41 @@ func (gc *GCAPI) Prepare() {
 //  "schedule": {
 //    "type": "Daily",
 //    "cron": "0 0 0 * * *"
+//  },
+//  "parameters": {
+//    "delete_untagged": true
 //  }
 //	}
 // create a manual trigger for GC
 // 	{
 //  "schedule": {
 //    "type": "Manual"
+//  },
+//  "parameters": {
+//    "delete_untagged": true
+//    "read_only": true
 //  }
 //	}
 func (gc *GCAPI) Post() {
-	ajr := models.AdminJobReq{}
-	gc.DecodeJSONReqAndValidate(&ajr)
+	parameters := make(map[string]interface{})
+	ajr := models.AdminJobReq{
+		Parameters: parameters,
+	}
+	isValid, err := gc.DecodeJSONReqAndValidate(&ajr)
+	if !isValid {
+		gc.SendBadRequestError(err)
+		return
+	}
+	ajr.Parameters["redis_url_reg"] = os.Getenv("_REDIS_URL_REG")
+	// default is the non-blocking GC job.
 	ajr.Name = common_job.ImageGC
-	ajr.Parameters = map[string]interface{}{
-		"redis_url_reg": os.Getenv("_REDIS_URL_REG"),
+	ajr.Parameters["time_window"] = config.GetGCTimeWindow()
+	// if specify read_only:true, API will submit the readonly GC job, otherwise default is non-blocking GC job.
+	readOnlyParam, exist := ajr.Parameters["read_only"]
+	if exist {
+		if readOnly, ok := readOnlyParam.(bool); ok && readOnly {
+			ajr.Name = common_job.ImageGCReadOnly
+		}
 	}
 	gc.submit(&ajr)
 	gc.Redirect(http.StatusCreated, strconv.FormatInt(ajr.ID, 10))
@@ -73,12 +95,24 @@ func (gc *GCAPI) Post() {
 //  "schedule": {
 //    "type": "None",
 //    "cron": ""
+//  },
+//  "parameters": {
+//    "delete_untagged": true
 //  }
 //	}
 func (gc *GCAPI) Put() {
-	ajr := models.AdminJobReq{}
-	gc.DecodeJSONReqAndValidate(&ajr)
+	parameters := make(map[string]interface{})
+	ajr := models.AdminJobReq{
+		Parameters: parameters,
+	}
+	isValid, err := gc.DecodeJSONReqAndValidate(&ajr)
+	if !isValid {
+		gc.SendBadRequestError(err)
+		return
+	}
 	ajr.Name = common_job.ImageGC
+	ajr.Parameters["redis_url_reg"] = os.Getenv("_REDIS_URL_REG")
+	ajr.Parameters["time_window"] = config.GetGCTimeWindow()
 	gc.updateSchedule(ajr)
 }
 
@@ -86,7 +120,7 @@ func (gc *GCAPI) Put() {
 func (gc *GCAPI) GetGC() {
 	id, err := gc.GetInt64FromPath(":id")
 	if err != nil {
-		gc.HandleInternalServerError(fmt.Sprintf("need to specify gc id"))
+		gc.SendInternalServerError(errors.New("need to specify gc id"))
 		return
 	}
 	gc.get(id)
@@ -106,7 +140,7 @@ func (gc *GCAPI) Get() {
 func (gc *GCAPI) GetLog() {
 	id, err := gc.GetInt64FromPath(":id")
 	if err != nil {
-		gc.HandleBadRequest("invalid ID")
+		gc.SendBadRequestError(errors.New("invalid ID"))
 		return
 	}
 	gc.getLog(id)

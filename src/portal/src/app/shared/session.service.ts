@@ -12,24 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 import { Injectable } from '@angular/core';
-import { Http, URLSearchParams } from '@angular/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { map, catchError } from "rxjs/operators";
 import { Observable, throwError as observableThrowError } from "rxjs";
-
-import { SessionUser } from './session-user';
+import { SessionUser, SessionUserBackend } from './session-user';
 import { Member } from '../project/member/member';
-
 import { SignInCredential } from './sign-in-credential';
-import { enLang } from '../shared/shared.const';
-import { HTTP_FORM_OPTIONS, HTTP_JSON_OPTIONS, HTTP_GET_OPTIONS } from "./shared.utils";
+import { enLang } from './shared.const';
+import { SessionViewmodelFactory } from './session.viewmodel.factory';
+import {
+    HTTP_FORM_OPTIONS,
+    HTTP_GET_OPTIONS,
+    HTTP_JSON_OPTIONS,
+    clone,
+    CURRENT_BASE_HREF
+} from "../../lib/utils/utils";
+import { FlushAll } from "../../lib/utils/cache-util";
 
 const signInUrl = '/c/login';
-const currentUserEndpoint = "/api/users/current";
+const currentUserEndpoint = CURRENT_BASE_HREF + "/users/current";
 const signOffEndpoint = "/c/log_out";
-const accountEndpoint = "/api/users/:id";
+const accountEndpoint = CURRENT_BASE_HREF + "/users/:id";
 const langEndpoint = "/language";
 const userExistsEndpoint = "/c/userExists";
-const renameAdminEndpoint = '/api/internal/renameadmin';
+const renameAdminEndpoint = CURRENT_BASE_HREF + '/internal/renameadmin';
 const langMap = {
     "zh": "zh-CN",
     "en": "en-US"
@@ -51,17 +57,18 @@ export class SessionService {
         "Content-Type": 'application/x-www-form-urlencoded'
     });*/
 
-    constructor(private http: Http) { }
+    constructor(private http: HttpClient, public sessionViewmodel: SessionViewmodelFactory) { }
 
     // Handle the related exceptions
     handleError(error: any): Observable<any> {
-        return observableThrowError(error.message || error);
+        return observableThrowError(error.error || error);
     }
 
     // Clear session
     clear(): void {
         this.currentUser = null;
         this.projectMembers = [];
+        FlushAll();
     }
 
     // Submit signin form to backend (NOT restful service)
@@ -70,10 +77,10 @@ export class SessionService {
         let queryParam: string = 'principal=' + encodeURIComponent(signInCredential.principal) +
             '&password=' + encodeURIComponent(signInCredential.password);
 
-        // Trigger Http
+        // Trigger HttpClient
         return this.http.post(signInUrl, queryParam, HTTP_FORM_OPTIONS)
             .pipe(map(() => null)
-            , catchError(error => this.handleError(error)));
+            , catchError(error => observableThrowError(error)));
     }
 
     /**
@@ -83,12 +90,11 @@ export class SessionService {
      *
      * @memberOf SessionService
      */
-    retrieveUser(): Observable<SessionUser> {
+    retrieveUser(): Observable<SessionUserBackend> {
         return this.http.get(currentUserEndpoint, HTTP_GET_OPTIONS)
-            .pipe(map(response => this.currentUser = response.json() as SessionUser)
+            .pipe(map((response: SessionUserBackend) => this.currentUser = this.sessionViewmodel.getCurrentUser(response) as SessionUser)
             , catchError(error => this.handleError(error)));
     }
-
     /**
      * For getting info
      */
@@ -169,16 +175,13 @@ export class SessionService {
 
     checkUserExisting(target: string, value: string): Observable<boolean> {
         // Build the form package
-        const body = new URLSearchParams();
-        body.set('target', target);
-        body.set('value', value);
+        let body = new HttpParams();
+        body = body.set('target', target);
+        body = body.set('value', value);
 
-        // Trigger Http
+        // Trigger HttpClient
         return this.http.post(userExistsEndpoint, body.toString(), HTTP_FORM_OPTIONS)
-            .pipe(map(response => {
-                return response.json();
-            })
-            , catchError(error => this.handleError(error)));
+            .pipe(catchError(error => this.handleError(error)));
     }
 
     setProjectMembers(projectMembers: Member[]): void {

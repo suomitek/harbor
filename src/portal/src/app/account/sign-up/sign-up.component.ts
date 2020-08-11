@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 import { Component, Output, ViewChild, EventEmitter } from '@angular/core';
-import { Modal } from '../../../../lib/src/service/interface';
+import { Modal } from '../../../lib/services/interface';
 
 import { NewUserFormComponent } from '../../shared/new-user-form/new-user-form.component';
 import { User } from '../../user/user';
@@ -39,13 +39,13 @@ export class SignUpComponent {
         private session: SessionService,
         private userService: UserService) { }
 
-    @ViewChild(NewUserFormComponent)
+    @ViewChild(NewUserFormComponent, {static: true})
     newUserForm: NewUserFormComponent;
 
-    @ViewChild(InlineAlertComponent)
-    inlienAlert: InlineAlertComponent;
+    @ViewChild(InlineAlertComponent, {static: false})
+    inlineAlert: InlineAlertComponent;
 
-    @ViewChild(Modal)
+    @ViewChild(Modal, {static: false})
     modal: Modal;
 
     getNewUser(): User {
@@ -67,7 +67,7 @@ export class SignUpComponent {
         if (this.error != null) {
             this.error = null; // clear error
         }
-        this.inlienAlert.close(); // Close alert if being shown
+        this.inlineAlert.close(); // Close alert if being shown
     }
 
     open(): void {
@@ -76,7 +76,7 @@ export class SignUpComponent {
         this.formValueChanged = false;
         this.error = null;
         this.onGoing = false;
-        this.inlienAlert.close();
+        this.inlineAlert.close();
 
         this.modal.open();
     }
@@ -87,7 +87,7 @@ export class SignUpComponent {
                 this.opened = false;
             } else {
                 // Need user confirmation
-                this.inlienAlert.showInlineConfirmation({
+                this.inlineAlert.showInlineConfirmation({
                     message: "ALERT.FORM_CHANGE_CONFIRMATION"
                 });
             }
@@ -127,7 +127,7 @@ export class SignUpComponent {
             }, error => {
                 this.onGoing = false;
                 this.error = error;
-                this.inlienAlert.showInlineError(error);
+                this.inlineAlert.showInlineError(error);
             });
     }
 }

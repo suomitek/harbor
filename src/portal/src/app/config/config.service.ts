@@ -12,26 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 import { Injectable } from '@angular/core';
-import { Http } from '@angular/http';
+import { HttpClient } from '@angular/common/http';
 import { map, catchError } from "rxjs/operators";
 import { Observable, throwError as observableThrowError } from "rxjs";
+import { Configuration } from "../../lib/components/config/config";
+import { CURRENT_BASE_HREF, HTTP_GET_OPTIONS, HTTP_JSON_OPTIONS } from "../../lib/utils/utils";
 
-import { Configuration } from '@harbor/ui';
-
-import {HTTP_GET_OPTIONS, HTTP_JSON_OPTIONS} from "../shared/shared.utils";
-
-const configEndpoint = "/api/configurations";
-const emailEndpoint = "/api/email/ping";
-const ldapEndpoint = "/api/ldap/ping";
+const configEndpoint = CURRENT_BASE_HREF + "/configurations";
+const emailEndpoint = CURRENT_BASE_HREF + "/email/ping";
+const ldapEndpoint = CURRENT_BASE_HREF + "/ldap/ping";
+const oidcEndpoint = CURRENT_BASE_HREF + "/system/oidc/ping";
 
 @Injectable()
 export class ConfigurationService {
 
-    constructor(private http: Http) { }
+    constructor(private http: HttpClient) { }
 
     public getConfiguration(): Observable<Configuration> {
         return this.http.get(configEndpoint, HTTP_GET_OPTIONS)
-        .pipe(map(response => response.json() as Configuration)
+        .pipe(map(response => response as Configuration)
         , catchError(error => observableThrowError(error)));
     }
 
@@ -51,5 +50,9 @@ export class ConfigurationService {
          return this.http.post(ldapEndpoint, JSON.stringify(ldapSettings), HTTP_JSON_OPTIONS)
         .pipe(map(response => response)
         , catchError(error => observableThrowError(error)));
+    }
+    public testOIDCServer(oidcSettings: any): Observable<any> {
+         return this.http.post(oidcEndpoint, JSON.stringify(oidcSettings), HTTP_JSON_OPTIONS)
+         .pipe(catchError(error => observableThrowError(error)));
     }
 }

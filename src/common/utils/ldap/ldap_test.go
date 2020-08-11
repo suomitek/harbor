@@ -7,13 +7,13 @@ import (
 
 	"github.com/goharbor/harbor/src/common"
 	"github.com/goharbor/harbor/src/common/models"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/test"
 	uiConfig "github.com/goharbor/harbor/src/core/config"
+	"github.com/goharbor/harbor/src/lib/log"
 	goldap "gopkg.in/ldap.v2"
 )
 
-var adminServerLdapTestConfig = map[string]interface{}{
+var ldapTestConfig = map[string]interface{}{
 	common.ExtEndpoint:        "host01.com",
 	common.AUTHMode:           "ldap_auth",
 	common.DatabaseType:       "postgresql",
@@ -31,11 +31,10 @@ var adminServerLdapTestConfig = map[string]interface{}{
 	common.LDAPFilter:           "",
 	common.LDAPScope:            3,
 	common.LDAPTimeout:          30,
-	common.CfgExpiration:        5,
 	common.AdminInitialPassword: "password",
 }
 
-var adminServerDefaultConfigWithVerifyCert = map[string]interface{}{
+var defaultConfigWithVerifyCert = map[string]interface{}{
 	common.ExtEndpoint:                "https://host01.com",
 	common.AUTHMode:                   common.LDAPAuth,
 	common.DatabaseType:               "postgresql",
@@ -66,9 +65,7 @@ var adminServerDefaultConfigWithVerifyCert = map[string]interface{}{
 	common.ProjectCreationRestriction: common.ProCrtRestrAdmOnly,
 	common.MaxJobWorkers:              3,
 	common.TokenExpiration:            30,
-	common.CfgExpiration:              5,
 	common.AdminInitialPassword:       "password",
-	common.AdmiralEndpoint:            "http://www.vmware.com",
 	common.WithNotary:                 false,
 	common.WithClair:                  false,
 }
@@ -87,11 +84,9 @@ func TestMain(m *testing.M) {
 		log.Fatalf("failed to set env %s: %v", "KEY_PATH", err)
 	}
 
-	if err := uiConfig.Init(); err != nil {
-		log.Fatalf("failed to initialize configurations: %v", err)
-	}
+	uiConfig.Init()
 
-	uiConfig.Upload(adminServerLdapTestConfig)
+	uiConfig.Upload(ldapTestConfig)
 
 	os.Exit(m.Run())
 
@@ -270,11 +265,11 @@ func TestSession_SearchGroup(t *testing.T) {
 	}
 
 	ldapConfig := models.LdapConf{
-		LdapURL:            adminServerLdapTestConfig[common.LDAPURL].(string) + ":389",
-		LdapSearchDn:       adminServerLdapTestConfig[common.LDAPSearchDN].(string),
+		LdapURL:            ldapTestConfig[common.LDAPURL].(string) + ":389",
+		LdapSearchDn:       ldapTestConfig[common.LDAPSearchDN].(string),
 		LdapScope:          2,
-		LdapSearchPassword: adminServerLdapTestConfig[common.LDAPSearchPwd].(string),
-		LdapBaseDn:         adminServerLdapTestConfig[common.LDAPBaseDN].(string),
+		LdapSearchPassword: ldapTestConfig[common.LDAPSearchPwd].(string),
+		LdapBaseDn:         ldapTestConfig[common.LDAPBaseDN].(string),
 	}
 
 	tests := []struct {
@@ -311,16 +306,22 @@ func TestSession_SearchGroup(t *testing.T) {
 
 func TestSession_SearchGroupByDN(t *testing.T) {
 	ldapConfig := models.LdapConf{
-		LdapURL:            adminServerLdapTestConfig[common.LDAPURL].(string) + ":389",
-		LdapSearchDn:       adminServerLdapTestConfig[common.LDAPSearchDN].(string),
+		LdapURL:            ldapTestConfig[common.LDAPURL].(string) + ":389",
+		LdapSearchDn:       ldapTestConfig[common.LDAPSearchDN].(string),
 		LdapScope:          2,
-		LdapSearchPassword: adminServerLdapTestConfig[common.LDAPSearchPwd].(string),
-		LdapBaseDn:         adminServerLdapTestConfig[common.LDAPBaseDN].(string),
+		LdapSearchPassword: ldapTestConfig[common.LDAPSearchPwd].(string),
+		LdapBaseDn:         ldapTestConfig[common.LDAPBaseDN].(string),
 	}
 	ldapGroupConfig := models.LdapGroupConf{
 		LdapGroupBaseDN:        "ou=group,dc=example,dc=com",
 		LdapGroupFilter:        "objectclass=groupOfNames",
 		LdapGroupNameAttribute: "cn",
+		LdapGroupSearchScope:   2,
+	}
+	ldapGroupConfig2 := models.LdapGroupConf{
+		LdapGroupBaseDN:        "ou=group,dc=example,dc=com",
+		LdapGroupFilter:        "objectclass=groupOfNames",
+		LdapGroupNameAttribute: "o",
 		LdapGroupSearchScope:   2,
 	}
 	type fields struct {
@@ -350,6 +351,14 @@ func TestSession_SearchGroupByDN(t *testing.T) {
 			fields{ldapConfig: ldapConfig, ldapGroupConfig: ldapGroupConfig},
 			args{groupDN: "random string"},
 			nil, true},
+		{"search with gid = cn",
+			fields{ldapConfig: ldapConfig, ldapGroupConfig: ldapGroupConfig},
+			args{groupDN: "cn=harbor_group,ou=groups,dc=example,dc=com"},
+			[]models.LdapGroup{{GroupName: "harbor_group", GroupDN: "cn=harbor_group,ou=groups,dc=example,dc=com"}}, false},
+		{"search with gid = o",
+			fields{ldapConfig: ldapConfig, ldapGroupConfig: ldapGroupConfig2},
+			args{groupDN: "cn=harbor_group,ou=groups,dc=example,dc=com"},
+			[]models.LdapGroup{{GroupName: "hgroup", GroupDN: "cn=harbor_group,ou=groups,dc=example,dc=com"}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,6 +376,28 @@ func TestSession_SearchGroupByDN(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Session.SearchGroupByDN() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeFilter(t *testing.T) {
+	type args struct {
+		filter string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{"normal test", args{"(objectclass=user)"}, "objectclass=user"},
+		{"with space", args{" (objectclass=user) "}, "objectclass=user"},
+		{"nothing", args{"objectclass=user"}, "objectclass=user"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeFilter(tt.args.filter); got != tt.want {
+				t.Errorf("normalizeFilter() = %v, want %v", got, tt.want)
 			}
 		})
 	}

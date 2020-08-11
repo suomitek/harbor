@@ -1,8 +1,8 @@
 import os, shutil, pathlib
-from g import templates_dir, config_dir, root_crt_path, secret_key_dir,DEFAULT_UID, DEFAULT_GID
+from g import templates_dir, config_dir, root_crt_path, secret_key_dir, secret_dir, DEFAULT_UID, DEFAULT_GID
 from .cert import openssl_installed, create_cert, create_root_cert, get_alias
 from .jinja import render_jinja
-from .misc import mark_file, prepare_config_dir
+from .misc import mark_file, prepare_dir
 
 notary_template_dir = os.path.join(templates_dir, "notary")
 notary_signer_pg_template = os.path.join(notary_template_dir, "signer-config.postgres.json.jinja")
@@ -20,12 +20,12 @@ notary_server_env_path = os.path.join(notary_config_dir, "server_env")
 
 
 def prepare_env_notary(nginx_config_dir):
-    notary_config_dir = prepare_config_dir(config_dir, "notary")
+    notary_config_dir = prepare_dir(config_dir, "notary")
     old_signer_cert_secret_path = pathlib.Path(os.path.join(config_dir, 'notary-signer.crt'))
     old_signer_key_secret_path = pathlib.Path(os.path.join(config_dir, 'notary-signer.key'))
     old_signer_ca_cert_secret_path = pathlib.Path(os.path.join(config_dir, 'notary-signer-ca.crt'))
 
-    notary_secret_dir = prepare_config_dir('/secret/notary')
+    notary_secret_dir = prepare_dir(secret_dir ,'notary')
     signer_cert_secret_path = pathlib.Path(os.path.join(notary_secret_dir, 'notary-signer.crt'))
     signer_key_secret_path = pathlib.Path(os.path.join(notary_secret_dir, 'notary-signer.key'))
     signer_ca_cert_secret_path = pathlib.Path(os.path.join(notary_secret_dir, 'notary-signer-ca.crt'))
@@ -70,15 +70,14 @@ def prepare_env_notary(nginx_config_dir):
         else:
             raise(Exception("No certs for notary"))
 
-    # copy server_env to notary config
-    shutil.copy2(
-        os.path.join(notary_template_dir, "server_env.jinja"),
-        os.path.join(notary_config_dir, "server_env"))
 
     print("Copying nginx configuration file for notary")
-    shutil.copy2(
+
+    render_jinja(
         os.path.join(templates_dir, "nginx", "notary.upstream.conf.jinja"),
-        os.path.join(nginx_config_dir, "notary.upstream.conf"))
+        os.path.join(nginx_config_dir, "notary.upstream.conf"),
+        gid=DEFAULT_GID,
+        uid=DEFAULT_UID)
 
     mark_file(os.path.join(notary_secret_dir, "notary-signer.crt"))
     mark_file(os.path.join(notary_secret_dir, "notary-signer.key"))
@@ -90,32 +89,39 @@ def prepare_notary(config_dict, nginx_config_dir, ssl_cert_path, ssl_cert_key_pa
     prepare_env_notary(nginx_config_dir)
 
     render_jinja(
-        notary_signer_pg_template,
-        notary_signer_pg_config,
+        notary_server_nginx_config_template,
+        os.path.join(nginx_config_dir, "notary.server.conf"),
+        gid=DEFAULT_GID,
         uid=DEFAULT_UID,
-        gid=DEFAULT_GID
-        )
+        ssl_cert=ssl_cert_path,
+        ssl_cert_key=ssl_cert_key_path)
 
     render_jinja(
         notary_server_pg_template,
         notary_server_pg_config,
         uid=DEFAULT_UID,
         gid=DEFAULT_GID,
-        token_endpoint=config_dict['public_url'])
-
-    render_jinja(
-        notary_server_nginx_config_template,
-        os.path.join(nginx_config_dir, "notary.server.conf"),
-        ssl_cert=ssl_cert_path,
-        ssl_cert_key=ssl_cert_key_path)
-
-    default_alias = get_alias(secret_key_dir)
-    render_jinja(
-        notary_signer_env_template,
-        notary_signer_env_path,
-        alias=default_alias)
+        token_endpoint=config_dict['public_url'],
+        **config_dict)
 
     render_jinja(
         notary_server_env_template,
-        notary_server_env_path
+        notary_server_env_path,
+        **config_dict
     )
+
+    default_alias = get_alias(secret_key_dir)
+
+    render_jinja(
+        notary_signer_env_template,
+        notary_signer_env_path,
+        alias=default_alias,
+        **config_dict)
+
+    render_jinja(
+        notary_signer_pg_template,
+        notary_signer_pg_config,
+        uid=DEFAULT_UID,
+        gid=DEFAULT_GID,
+        alias=default_alias,
+        **config_dict)

@@ -15,20 +15,19 @@ import { Component, OnInit } from '@angular/core';
 import { Router, ActivatedRoute } from '@angular/router';
 import { Input, ViewChild, AfterViewChecked } from '@angular/core';
 import { NgForm } from '@angular/forms';
-
 import { SessionService } from '../shared/session.service';
 import { SignInCredential } from '../shared/sign-in-credential';
-
 import { SignUpComponent } from '../account/sign-up/sign-up.component';
-import { CommonRoutes } from '../shared/shared.const';
 import { ForgotPasswordComponent } from '../account/password-setting/forgot-password/forgot-password.component';
-
-import { AppConfigService } from '../app-config.service';
-import { AppConfig } from '../app-config';
+import { AppConfigService } from '../services/app-config.service';
+import { AppConfig } from '../services/app-config';
 import { User } from '../user/user';
-
 import { CookieService, CookieOptions } from 'ngx-cookie';
-import { SkinableConfig } from "../skinable-config.service";
+import { SkinableConfig } from "../services/skinable-config.service";
+import {ModalEvent} from "../base/modal-event";
+import {modalEvents} from "../base/modal-events.const";
+import {AboutDialogComponent} from "../shared/about-dialog/about-dialog.component";
+import { CommonRoutes, CONFIG_AUTH_MODE } from "../../lib/entities/shared.const";
 
 // Define status flags for signing in states
 export const signInStatusNormal = 0;
@@ -54,9 +53,10 @@ export class SignInComponent implements AfterViewChecked, OnInit {
     customAppTitle: string;
     // Form reference
     signInForm: NgForm;
-    @ViewChild('signInForm') currentForm: NgForm;
-    @ViewChild('signupDialog') signUpDialog: SignUpComponent;
-    @ViewChild('forgotPwdDialog') forgotPwdDialog: ForgotPasswordComponent;
+    @ViewChild('signInForm', {static: true}) currentForm: NgForm;
+    @ViewChild('signupDialog', {static: false}) signUpDialog: SignUpComponent;
+    @ViewChild('forgotPwdDialog', {static: false}) forgotPwdDialog: ForgotPasswordComponent;
+    @ViewChild(AboutDialogComponent, {static: false}) aboutDialog: AboutDialogComponent;
 
     // Status flag
     signInStatus: number = signInStatusNormal;
@@ -82,18 +82,18 @@ export class SignInComponent implements AfterViewChecked, OnInit {
             if (customSkinObj.loginBgImg) {
                 this.customLoginBgImg = customSkinObj.loginBgImg;
             }
-           if (customSkinObj.appTitle) {
-               this.customAppTitle = customSkinObj.appTitle;
-           }
+            if (customSkinObj.appTitle) {
+                this.customAppTitle = customSkinObj.appTitle;
+            }
         }
 
         // Make sure the updated configuration can be loaded
         this.appConfigService.load()
             .subscribe(updatedConfig => this.appConfig = updatedConfig
                 , error => {
-                // Catch the error
-                console.error("Failed to load bootstrap options with error: ", error);
-            });
+                    // Catch the error
+                    console.error("Failed to load bootstrap options with error: ", error);
+                });
 
         this.route.queryParams
             .subscribe(params => {
@@ -138,14 +138,11 @@ export class SignInComponent implements AfterViewChecked, OnInit {
 
     // Whether show the 'sign up' link
     public get selfSignUp(): boolean {
-        return this.appConfig.auth_mode === 'db_auth'
+        return this.appConfig.auth_mode === CONFIG_AUTH_MODE.DB_AUTH
             && this.appConfig.self_registration;
     }
     public get isOidcLoginMode(): boolean {
-        return this.appConfig.auth_mode === 'oidc_auth';
-    }
-    public get showForgetPwd(): boolean {
-        return this.appConfig.auth_mode !== 'ldap_auth' && this.appConfig.auth_mode !== 'uaa_auth';
+        return this.appConfig.auth_mode === CONFIG_AUTH_MODE.OIDC_AUTH;
     }
     clickRememberMe($event: any): void {
         if ($event && $event.target) {
@@ -258,6 +255,16 @@ export class SignInComponent implements AfterViewChecked, OnInit {
                     this.router.navigateByUrl(this.redirectUrl);
                 }
             }, error => {
+                // 403 oidc login no body;
+                if (this.isOidcLoginMode && error && error.status === 403) {
+                    try {
+                        let redirect_location = '';
+                        redirect_location = error.error && error.error.redirect_location ?
+                            error.error.redirect_location : JSON.parse(error.error).redirect_location;
+                        window.location.href = redirect_location;
+                        return;
+                    } catch (error) { }
+                }
                 this.handleError(error);
             });
     }
@@ -272,6 +279,16 @@ export class SignInComponent implements AfterViewChecked, OnInit {
         this.forgotPwdDialog.open();
     }
 
+    // Open modal dialog
+    openModal(event: ModalEvent): void {
+        switch (event.modalName) {
+            case modalEvents.ABOUT:
+                this.aboutDialog.open();
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 

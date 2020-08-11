@@ -1,55 +1,64 @@
 import { AfterViewInit, Component, ElementRef, OnInit } from '@angular/core';
-import { Http } from '@angular/http';
-import { throwError as observableThrowError, Observable } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
+import { throwError as observableThrowError, forkJoin } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import { Title } from '@angular/platform-browser';
 import { TranslateService } from '@ngx-translate/core';
+import { CookieService } from "ngx-cookie";
+import * as SwaggerUI from 'swagger-ui';
+import { mergeDeep } from "../../lib/utils/utils";
+import { DevCenterBase } from "./dev-center-base";
 
+enum SwaggerJsonUrls {
+  SWAGGER1 = '/swagger.json',
+  SWAGGER2 = '/swagger2.json'
+}
 
-const SwaggerUI = require('swagger-ui');
 @Component({
   selector: 'dev-center',
   templateUrl: 'dev-center.component.html',
   viewProviders: [Title],
   styleUrls: ['dev-center.component.scss']
 })
-export class DevCenterComponent implements AfterViewInit, OnInit {
+export class DevCenterComponent extends DevCenterBase implements AfterViewInit, OnInit {
   private ui: any;
-  private host: any;
-  private json: any;
   constructor(
     private el: ElementRef,
-    private http: Http,
-    private translate: TranslateService,
-    private titleService: Title) {
-  }
-
-  ngOnInit() {
-    this.setTitle("APP_TITLE.HARBOR_SWAGGER");
-  }
-
-
-  public setTitle( key: string) {
-    this.translate.get(key).subscribe((res: string) => {
-      this.titleService.setTitle(res);
-  });
+    private http: HttpClient,
+    public translate: TranslateService,
+    public cookieService: CookieService,
+    public titleService: Title) {
+      super(translate, cookieService, titleService);
   }
 
   ngAfterViewInit() {
-    this.http.get("/swagger.json")
-    .pipe(catchError(error => observableThrowError(error)))
-    .pipe(map(response => response.json())).subscribe(json => {
-      json.host = window.location.host;
-      const protocal = window.location.protocol;
-      json.schemes = [protocal.replace(":", "")];
-      let ui = SwaggerUI({
-        spec: json,
-        domNode: this.el.nativeElement.querySelector('.swagger-container'),
-        deepLinking: true,
-        presets: [
-          SwaggerUI.presets.apis
-        ],
+    this.getSwaggerUI();
+  }
+  getSwaggerUI() {
+    const _this = this;
+    forkJoin([this.http.get(SwaggerJsonUrls.SWAGGER1), this.http.get(SwaggerJsonUrls.SWAGGER2)])
+      .pipe(catchError(error => observableThrowError(error)))
+      .subscribe(jsonArr => {
+        const json: object = {};
+        mergeDeep(json, jsonArr[0], jsonArr[1]);
+        json['host'] = window.location.host;
+        const protocal = window.location.protocol;
+        json['schemes'] = [protocal.replace(":", "")];
+        this.ui = SwaggerUI({
+          spec: json,
+          domNode: this.el.nativeElement.querySelector('.swagger-container'),
+          deepLinking: true,
+          presets: [
+            SwaggerUI.presets.apis
+          ],
+          requestInterceptor: this.getCsrfInterceptor().requestInterceptor,
+          authorizations: {
+            csrf: function () {
+              this.headers['X-Harbor-CSRF-Token'] = _this.cookieService.get('__csrf');
+              return true;
+            }
+          }
+        });
       });
-    });
   }
 }

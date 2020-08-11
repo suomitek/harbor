@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-import { Component, Input, ViewChild, SimpleChanges, OnChanges } from '@angular/core';
+import { Component, Input, ViewChild, SimpleChanges, OnChanges, Output, EventEmitter } from '@angular/core';
 import { NgForm } from '@angular/forms';
-
-import { Configuration, clone, isEmpty, getChanges, StringValueItem} from '@harbor/ui';
 import { MessageHandlerService } from '../../shared/message-handler/message-handler.service';
 import { ConfirmMessageHandler } from '../config.msg.utils';
 import { ConfigurationService } from '../config.service';
+import { Configuration } from "../../../lib/components/config/config";
+import { isEmpty, getChanges as getChangesFunc, clone } from "../../../lib/utils/utils";
+import { errorHandler } from "../../../lib/utils/shared/shared.utils";
 const fakePass = 'aWpLOSYkIzJTTU4wMDkx';
 @Component({
     selector: 'config-email',
@@ -27,10 +28,11 @@ const fakePass = 'aWpLOSYkIzJTTU4wMDkx';
 export class ConfigurationEmailComponent implements OnChanges {
     // tslint:disable-next-line:no-input-rename
     @Input("mailConfig") currentConfig: Configuration = new Configuration();
+    @Output() refreshAllconfig = new EventEmitter<any>();
     private originalConfig: Configuration;
     testingMailOnGoing = false;
     onGoing = false;
-    @ViewChild("mailConfigFrom") mailForm: NgForm;
+    @ViewChild("mailConfigFrom", {static: true}) mailForm: NgForm;
 
     constructor(
         private msgHandler: MessageHandlerService,
@@ -55,7 +57,7 @@ export class ConfigurationEmailComponent implements OnChanges {
     }
 
     public getChanges() {
-        let allChanges = getChanges(this.originalConfig, this.currentConfig);
+        let allChanges = getChangesFunc(this.originalConfig, this.currentConfig);
         let changes = {};
         for (let prop in allChanges) {
             if (prop.startsWith('email_')) {
@@ -105,7 +107,7 @@ export class ConfigurationEmailComponent implements OnChanges {
                 this.msgHandler.showSuccess('CONFIG.TEST_MAIL_SUCCESS');
             }, error => {
                 this.testingMailOnGoing = false;
-                let err = error._body;
+                let err =  errorHandler(error);
                 if (!err) {
                     err = 'UNKNOWN';
                 }
@@ -135,7 +137,8 @@ export class ConfigurationEmailComponent implements OnChanges {
             this.configService.saveConfiguration(changes)
                 .subscribe(response => {
                     this.onGoing = false;
-                    this.retrieveConfig();
+                    // refresh allConfig
+                    this.refreshAllconfig.emit();
                     this.msgHandler.showSuccess('CONFIG.SAVE_SUCCESS');
                 }, error => {
                     this.onGoing = false;
@@ -145,23 +148,6 @@ export class ConfigurationEmailComponent implements OnChanges {
             // Inprop situation, should not come here
             console.error('Save abort because nothing changed');
         }
-    }
-
-    retrieveConfig(): void {
-        this.onGoing = true;
-        this.configService.getConfiguration()
-            .subscribe((configurations: Configuration) => {
-                this.onGoing = false;
-
-                // Add two password fields
-                configurations.email_password = new StringValueItem(fakePass, true);
-                this.currentConfig = configurations;
-                // Keep the original copy of the data
-                this.originalConfig = clone(configurations);
-            }, error => {
-                this.onGoing = false;
-                this.msgHandler.handleError(error);
-            });
     }
 
     /**

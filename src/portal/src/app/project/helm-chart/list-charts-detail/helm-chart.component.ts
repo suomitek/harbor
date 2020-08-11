@@ -2,19 +2,13 @@ import {
   Component,
   Input,
   OnInit,
-  ChangeDetectionStrategy,
   Output,
   EventEmitter,
   ViewChild,
-  ChangeDetectorRef
 } from "@angular/core";
 import { NgForm } from '@angular/forms';
 import { TranslateService } from "@ngx-translate/core";
-import {
-  State, ErrorHandler, SystemInfo, SystemInfoService, DEFAULT_PAGE_SIZE, downloadFile
-  , OperationService, UserPermissionService, USERSTATICPERMISSION, OperateInfo, OperationState, operateChanges
-} from "@harbor/ui";
-import { forkJoin, throwError, Observable } from "rxjs";
+import { forkJoin, throwError as observableThrowError, Observable } from "rxjs";
 import { finalize, map, catchError } from "rxjs/operators";
 import { HelmChartItem } from "../helm-chart.interface.service";
 import { HelmChartService } from "../helm-chart.service";
@@ -28,12 +22,23 @@ import {
   ConfirmationTargets,
   ConfirmationState,
 } from "../../../shared/shared.const";
+import {
+  State,
+  SystemInfo,
+  SystemInfoService,
+  UserPermissionService,
+  USERSTATICPERMISSION
+} from "../../../../lib/services";
+import { DEFAULT_PAGE_SIZE, downloadFile } from "../../../../lib/utils/utils";
+import { ErrorHandler } from "../../../../lib/utils/error-handler";
+import { OperationService } from "../../../../lib/components/operation/operation.service";
+import { operateChanges, OperateInfo, OperationState } from "../../../../lib/components/operation/operate";
+import { errorHandler as errorHandlerFn } from "../../../../lib/utils/shared/shared.utils";
 
 @Component({
   selector: "hbr-helm-chart",
   templateUrl: "./helm-chart.component.html",
   styleUrls: ["./helm-chart.component.scss"],
-  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class HelmChartComponent implements OnInit {
   signedCon: { [key: string]: any | string[] } = {};
@@ -69,9 +74,9 @@ export class HelmChartComponent implements OnInit {
   totalCount = 0;
   currentState: State;
 
-  @ViewChild('chartUploadForm') uploadForm: NgForm;
+  @ViewChild('chartUploadForm', {static: false}) uploadForm: NgForm;
 
-  @ViewChild("confirmationDialog") confirmationDialog: ConfirmationDialogComponent;
+  @ViewChild("confirmationDialog", {static: false}) confirmationDialog: ConfirmationDialogComponent;
   hasUploadHelmChartsPermission: boolean;
   hasDownloadHelmChartsPermission: boolean;
   hasDeleteHelmChartsPermission: boolean;
@@ -82,7 +87,6 @@ export class HelmChartComponent implements OnInit {
     private helmChartService: HelmChartService,
     private userPermissionService: UserPermissionService,
     private operationService: OperationService,
-    private cdr: ChangeDetectorRef,
   ) { }
 
   public get registryUrl(): string {
@@ -118,11 +122,10 @@ export class HelmChartComponent implements OnInit {
 
   refresh() {
     this.loading = true;
+    this.selectedRows = [];
     this.helmChartService
       .getHelmCharts(this.projectName)
       .pipe(finalize(() => {
-        let hnd = setInterval(() => this.cdr.markForCheck(), 100);
-        setTimeout(() => clearInterval(hnd), 3000);
         this.loading = false;
       }))
       .subscribe(
@@ -201,8 +204,14 @@ export class HelmChartComponent implements OnInit {
 
     return this.helmChartService.deleteHelmChart(this.projectName, chartName)
       .pipe(map(
-        () => operateChanges(operateMsg, OperationState.success),
-        err => operateChanges(operateMsg, OperationState.failure, err)
+        () => operateChanges(operateMsg, OperationState.success)),
+        catchError( error => {
+          const message = errorHandlerFn(error);
+          this.translateService.get(message).subscribe(res =>
+            operateChanges(operateMsg, OperationState.failure, res)
+          );
+          return observableThrowError(error);
+        }
       ));
   }
 
@@ -211,12 +220,14 @@ export class HelmChartComponent implements OnInit {
     let chartsDelete$ = charts.map(chart => this.deleteChart(chart.name));
     forkJoin(chartsDelete$)
       .pipe(
-        catchError(err => throwError(err)),
         finalize(() => {
           this.refresh();
           this.selectedRows = [];
         }))
-      .subscribe(() => { });
+      .subscribe(() => { }
+      , error => {
+        this.errorHandler.error(error);
+      });
   }
 
   downloadLatestVersion(evt?: Event, item?: HelmChartItem) {
@@ -248,13 +259,13 @@ export class HelmChartComponent implements OnInit {
     );
   }
 
-  openChartDeleteModal(charts: HelmChartItem[]) {
-    let chartNames = charts.map(chart => chart.name).join(",");
+  openChartDeleteModal() {
+    let chartNames = this.selectedRows.map(chart => chart.name).join(",");
     let message = new ConfirmationMessage(
       "HELM_CHART.DELETE_CHART_VERSION_TITLE",
       "HELM_CHART.DELETE_CHART_VERSION",
       chartNames,
-      charts,
+      this.selectedRows,
       ConfirmationTargets.HELM_CHART,
       ConfirmationButtons.DELETE_CANCEL
     );

@@ -45,12 +45,14 @@ type SQLite struct {
 
 // PostGreSQL ...
 type PostGreSQL struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password,omitempty"`
-	Database string `json:"database"`
-	SSLMode  string `json:"sslmode"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Username     string `json:"username"`
+	Password     string `json:"password,omitempty"`
+	Database     string `json:"database"`
+	SSLMode      string `json:"sslmode"`
+	MaxIdleConns int    `json:"max_idle_conns"`
+	MaxOpenConns int    `json:"max_open_conns"`
 }
 
 // Email ...
@@ -70,7 +72,8 @@ type HTTPAuthProxy struct {
 	Endpoint            string `json:"endpoint"`
 	TokenReviewEndpoint string `json:"tokenreivew_endpoint"`
 	VerifyCert          bool   `json:"verify_cert"`
-	AlwaysOnBoard       bool   `json:"always_onboard"`
+	SkipSearch          bool   `json:"skip_search"`
+	ServerCertificate   string `json:"server_certificate"`
 }
 
 // OIDCSetting wraps the settings for OIDC auth endpoint
@@ -78,10 +81,18 @@ type OIDCSetting struct {
 	Name         string   `json:"name"`
 	Endpoint     string   `json:"endpoint"`
 	VerifyCert   bool     `json:"verify_cert"`
+	AutoOnboard  bool     `json:"auto_onboard"`
 	ClientID     string   `json:"client_id"`
 	ClientSecret string   `json:"client_secret"`
+	GroupsClaim  string   `json:"groups_claim"`
 	RedirectURL  string   `json:"redirect_url"`
 	Scope        []string `json:"scope"`
+	UserClaim    string   `json:"user_claim"`
+}
+
+// QuotaSetting wraps the settings for Quota
+type QuotaSetting struct {
+	StoragePerProject int64 `json:"storage_per_project"`
 }
 
 // ConfigEntry ...

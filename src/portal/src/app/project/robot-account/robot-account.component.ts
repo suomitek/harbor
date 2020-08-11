@@ -11,25 +11,21 @@ import { Robot } from "./robot";
 import { Project } from "./../project";
 import { finalize, catchError, map } from "rxjs/operators";
 import { TranslateService } from "@ngx-translate/core";
-import { Subscription, forkJoin, Observable, throwError } from "rxjs";
+import { Subscription, forkJoin, Observable, throwError as observableThrowError } from "rxjs";
 import { MessageHandlerService } from "../../shared/message-handler/message-handler.service";
 import { RobotService } from "./robot-account.service";
 import { ConfirmationMessage } from "../../shared/confirmation-dialog/confirmation-message";
+import { ConfirmationDialogService } from "../../shared/confirmation-dialog/confirmation-dialog.service";
 import {
   ConfirmationTargets,
   ConfirmationState,
   ConfirmationButtons
 } from "../../shared/shared.const";
-import { ConfirmationDialogService } from "../../shared/confirmation-dialog/confirmation-dialog.service";
-import {
-  operateChanges,
-  OperateInfo,
-  OperationService,
-  OperationState,
-  UserPermissionService,
-  USERSTATICPERMISSION,
-  ErrorHandler
-} from "@harbor/ui";
+import { OperationService } from "../../../lib/components/operation/operation.service";
+import { UserPermissionService, USERSTATICPERMISSION } from "../../../lib/services";
+import { ErrorHandler } from "../../../lib/utils/error-handler";
+import { operateChanges, OperateInfo, OperationState } from "../../../lib/components/operation/operate";
+import { errorHandler as errorHandlerFn } from "../../../lib/utils/shared/shared.utils";
 
 @Component({
   selector: "app-robot-account",
@@ -37,7 +33,7 @@ import {
   styleUrls: ["./robot-account.component.scss"]
 })
 export class RobotAccountComponent implements OnInit, OnDestroy {
-  @ViewChild(AddRobotComponent)
+  @ViewChild(AddRobotComponent, {static: false})
   addRobotComponent: AddRobotComponent;
   selectedRow: Robot[] = [];
   robotsCopy: Robot[] = [];
@@ -140,13 +136,15 @@ export class RobotAccountComponent implements OnInit, OnDestroy {
     let robotsDelete$ = robots.map(robot => this.delOperate(robot));
     forkJoin(robotsDelete$)
       .pipe(
-        catchError(err => throwError(err)),
         finalize(() => {
           this.retrieve();
           this.selectedRow = [];
         })
       )
-      .subscribe(() => { });
+      .subscribe(() => { }
+      , error => {
+        this.errorHandler.error(error);
+      });
   }
 
   delOperate(robot: Robot) {
@@ -163,9 +161,15 @@ export class RobotAccountComponent implements OnInit, OnDestroy {
       .pipe(
         map(
           () => operateChanges(operMessage, OperationState.success),
-          err => operateChanges(operMessage, OperationState.failure, err)
+          catchError(error => {
+            const errorMsg = errorHandlerFn(error);
+            this.translate.get(errorMsg).subscribe(res =>
+              operateChanges(operMessage, OperationState.failure, res)
+            );
+            return observableThrowError(error);
+          }
         )
-      );
+      ));
   }
 
   createAccount(created: boolean): void {

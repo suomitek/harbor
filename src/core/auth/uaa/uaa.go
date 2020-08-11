@@ -23,10 +23,10 @@ import (
 	"github.com/goharbor/harbor/src/common"
 	"github.com/goharbor/harbor/src/common/dao"
 	"github.com/goharbor/harbor/src/common/models"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/uaa"
 	"github.com/goharbor/harbor/src/core/auth"
 	"github.com/goharbor/harbor/src/core/config"
+	"github.com/goharbor/harbor/src/lib/log"
 )
 
 // Auth is the implementation of AuthenticateHelper to access uaa for authentication.
@@ -77,9 +77,8 @@ func fillEmailRealName(user *models.User) {
 	if len(user.Realname) == 0 {
 		user.Realname = user.Username
 	}
-	if len(user.Email) == 0 {
-		// TODO: handle the case when user.Username itself is an email address.
-		user.Email = user.Username + "@uaa.placeholder"
+	if len(user.Email) == 0 && strings.Contains(user.Username, "@") {
+		user.Email = user.Username
 	}
 }
 
@@ -93,7 +92,7 @@ func (u *Auth) PostAuthenticate(user *models.User) error {
 		return u.OnBoardUser(user)
 	}
 	user.UserID = dbUser.UserID
-	user.HasAdminRole = dbUser.HasAdminRole
+	user.SysAdminFlag = dbUser.SysAdminFlag
 	fillEmailRealName(user)
 	if err2 := dao.ChangeUserProfile(*user, "Email", "Realname"); err2 != nil {
 		log.Warningf("Failed to update user profile, user: %s, error: %v", user.Username, err2)

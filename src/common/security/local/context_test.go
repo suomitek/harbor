@@ -20,15 +20,15 @@ import (
 
 	"github.com/goharbor/harbor/src/common"
 	"github.com/goharbor/harbor/src/common/dao"
+	"github.com/goharbor/harbor/src/common/dao/group"
 	"github.com/goharbor/harbor/src/common/dao/project"
 	"github.com/goharbor/harbor/src/common/models"
 	"github.com/goharbor/harbor/src/common/rbac"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/test"
 	"github.com/goharbor/harbor/src/core/promgr"
 	"github.com/goharbor/harbor/src/core/promgr/pmsdriver/local"
+	"github.com/goharbor/harbor/src/lib/log"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -161,7 +161,7 @@ func TestIsSysAdmin(t *testing.T) {
 	// authenticated, admin
 	ctx = NewSecurityContext(&models.User{
 		Username:     "test",
-		HasAdminRole: true,
+		SysAdminFlag: true,
 	}, nil)
 	assert.True(t, ctx.IsSysAdmin())
 }
@@ -171,16 +171,16 @@ func TestIsSolutionUser(t *testing.T) {
 	assert.False(t, ctx.IsSolutionUser())
 }
 
-func TestHasReadPerm(t *testing.T) {
+func TestHasPullPerm(t *testing.T) {
 	// public project
 	ctx := NewSecurityContext(nil, pm)
 
-	resource := rbac.NewProjectNamespace("library").Resource(rbac.ResourceRepository)
+	resource := rbac.NewProjectNamespace(1).Resource(rbac.ResourceRepository)
 	assert.True(t, ctx.Can(rbac.ActionPull, resource))
 
 	// private project, unauthenticated
 	ctx = NewSecurityContext(nil, pm)
-	resource = rbac.NewProjectNamespace(private.Name).Resource(rbac.ResourceRepository)
+	resource = rbac.NewProjectNamespace(private.ProjectID).Resource(rbac.ResourceRepository)
 	assert.False(t, ctx.Can(rbac.ActionPull, resource))
 
 	// private project, authenticated, has no perm
@@ -196,13 +196,13 @@ func TestHasReadPerm(t *testing.T) {
 	// private project, authenticated, system admin
 	ctx = NewSecurityContext(&models.User{
 		Username:     "admin",
-		HasAdminRole: true,
+		SysAdminFlag: true,
 	}, pm)
 	assert.True(t, ctx.Can(rbac.ActionPull, resource))
 }
 
-func TestHasWritePerm(t *testing.T) {
-	resource := rbac.NewProjectNamespace(private.Name).Resource(rbac.ResourceRepository)
+func TestHasPushPerm(t *testing.T) {
+	resource := rbac.NewProjectNamespace(private.ProjectID).Resource(rbac.ResourceRepository)
 
 	// unauthenticated
 	ctx := NewSecurityContext(nil, pm)
@@ -219,31 +219,31 @@ func TestHasWritePerm(t *testing.T) {
 	// authenticated, system admin
 	ctx = NewSecurityContext(&models.User{
 		Username:     "admin",
-		HasAdminRole: true,
+		SysAdminFlag: true,
 	}, pm)
 	assert.True(t, ctx.Can(rbac.ActionPush, resource))
 }
 
-func TestHasAllPerm(t *testing.T) {
-	resource := rbac.NewProjectNamespace(private.Name).Resource(rbac.ResourceRepository)
+func TestHasPushPullPerm(t *testing.T) {
+	resource := rbac.NewProjectNamespace(private.ProjectID).Resource(rbac.ResourceRepository)
 
 	// unauthenticated
 	ctx := NewSecurityContext(nil, pm)
-	assert.False(t, ctx.Can(rbac.ActionPushPull, resource))
+	assert.False(t, ctx.Can(rbac.ActionPush, resource) && ctx.Can(rbac.ActionPull, resource))
 
 	// authenticated, has all perms
 	ctx = NewSecurityContext(projectAdminUser, pm)
-	assert.True(t, ctx.Can(rbac.ActionPushPull, resource))
+	assert.True(t, ctx.Can(rbac.ActionPush, resource) && ctx.Can(rbac.ActionPull, resource))
 
 	// authenticated, system admin
 	ctx = NewSecurityContext(&models.User{
 		Username:     "admin",
-		HasAdminRole: true,
+		SysAdminFlag: true,
 	}, pm)
-	assert.True(t, ctx.Can(rbac.ActionPushPull, resource))
+	assert.True(t, ctx.Can(rbac.ActionPush, resource) && ctx.Can(rbac.ActionPull, resource))
 }
 
-func TestHasAllPermWithGroup(t *testing.T) {
+func TestHasPushPullPermWithGroup(t *testing.T) {
 	PrepareGroupTest()
 	project, err := dao.GetProjectByName("group_project")
 	if err != nil {
@@ -253,55 +253,24 @@ func TestHasAllPermWithGroup(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error occurred when GetUser: %v", err)
 	}
-	developer.GroupList = []*models.UserGroup{
-		{GroupName: "test_group", GroupType: 1, LdapGroupDN: "cn=harbor_user,dc=example,dc=com"},
+
+	userGroups, err := group.QueryUserGroup(models.UserGroup{GroupType: common.LDAPGroupType, LdapGroupDN: "cn=harbor_user,dc=example,dc=com"})
+	if err != nil {
+		t.Errorf("Failed to query user group %v", err)
+	}
+	if len(userGroups) < 1 {
+		t.Errorf("Failed to retrieve user group")
 	}
 
-	resource := rbac.NewProjectNamespace(project.Name).Resource(rbac.ResourceRepository)
+	developer.GroupIDs = []int{userGroups[0].ID}
+
+	resource := rbac.NewProjectNamespace(project.ProjectID).Resource(rbac.ResourceRepository)
 
 	ctx := NewSecurityContext(developer, pm)
-	assert.False(t, ctx.Can(rbac.ActionPushPull, resource))
 	assert.True(t, ctx.Can(rbac.ActionPush, resource))
 	assert.True(t, ctx.Can(rbac.ActionPull, resource))
 }
 
-func TestGetMyProjects(t *testing.T) {
-	ctx := NewSecurityContext(guestUser, pm)
-	projects, err := ctx.GetMyProjects()
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(projects))
-	assert.Equal(t, private.ProjectID, projects[0].ProjectID)
-}
-
-func TestGetProjectRoles(t *testing.T) {
-	// unauthenticated
-	ctx := NewSecurityContext(nil, pm)
-	roles := ctx.GetProjectRoles(private.Name)
-	assert.Equal(t, 0, len(roles))
-
-	// authenticated, project name of ID is nil
-	ctx = NewSecurityContext(guestUser, pm)
-	roles = ctx.GetProjectRoles(nil)
-	assert.Equal(t, 0, len(roles))
-
-	// authenticated, has read perm
-	ctx = NewSecurityContext(guestUser, pm)
-	roles = ctx.GetProjectRoles(private.Name)
-	assert.Equal(t, 1, len(roles))
-	assert.Equal(t, common.RoleGuest, roles[0])
-
-	// authenticated, has write perm
-	ctx = NewSecurityContext(developerUser, pm)
-	roles = ctx.GetProjectRoles(private.Name)
-	assert.Equal(t, 1, len(roles))
-	assert.Equal(t, common.RoleDeveloper, roles[0])
-
-	// authenticated, has all perms
-	ctx = NewSecurityContext(projectAdminUser, pm)
-	roles = ctx.GetProjectRoles(private.Name)
-	assert.Equal(t, 1, len(roles))
-	assert.Equal(t, common.RoleProjectAdmin, roles[0])
-}
 func PrepareGroupTest() {
 	initSqls := []string{
 		`insert into user_group (group_name, group_type, ldap_group_dn) values ('harbor_group_01', 1, 'cn=harbor_user,dc=example,dc=com')`,
@@ -321,77 +290,4 @@ func PrepareGroupTest() {
 		`delete from harbor_user where username = 'sample01'`,
 	}
 	dao.PrepareTestData(clearSqls, initSqls)
-}
-
-func TestSecurityContext_GetRolesByGroup(t *testing.T) {
-	PrepareGroupTest()
-	project, err := dao.GetProjectByName("group_project")
-	if err != nil {
-		t.Errorf("Error occurred when GetProjectByName: %v", err)
-	}
-	developer, err := dao.GetUser(models.User{Username: "sample01"})
-	if err != nil {
-		t.Errorf("Error occurred when GetUser: %v", err)
-	}
-	developer.GroupList = []*models.UserGroup{
-		{GroupName: "test_group", GroupType: 1, LdapGroupDN: "cn=harbor_user,dc=example,dc=com"},
-	}
-	type fields struct {
-		user *models.User
-		pm   promgr.ProjectManager
-	}
-	type args struct {
-		projectIDOrName interface{}
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		want   []int
-	}{
-		{"Developer", fields{user: developer, pm: pm}, args{project.ProjectID}, []int{2}},
-		{"Guest", fields{user: guestUser, pm: pm}, args{project.ProjectID}, []int{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &SecurityContext{
-				user: tt.fields.user,
-				pm:   tt.fields.pm,
-			}
-			if got := s.GetRolesByGroup(tt.args.projectIDOrName); !dao.ArrayEqual(got, tt.want) {
-				t.Errorf("SecurityContext.GetRolesByGroup() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSecurityContext_GetMyProjects(t *testing.T) {
-	type fields struct {
-		user *models.User
-		pm   promgr.ProjectManager
-	}
-	tests := []struct {
-		name     string
-		fields   fields
-		wantSize int
-		wantErr  bool
-	}{
-		{"Admin", fields{user: projectAdminUser, pm: pm}, 1, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &SecurityContext{
-				user: tt.fields.user,
-				pm:   tt.fields.pm,
-			}
-			got, err := s.GetMyProjects()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("SecurityContext.GetMyProjects() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if len(got) != tt.wantSize {
-				t.Errorf("SecurityContext.GetMyProjects() = %v, want %v", len(got), tt.wantSize)
-			}
-		})
-	}
 }

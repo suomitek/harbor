@@ -1,6 +1,9 @@
 import base
 
-class Chart(base.Base):
+class Chart(base.Base, object):
+    def __init__(self):
+        super(Chart,self).__init__(api_type = "chart")
+
     def upload_chart(self, repository, chart, prov = None, expect_status_code = 201, **kwargs):
         client = self._get_client(**kwargs)
         _, status_code, _ = client.chartrepo_repo_charts_post_with_http_info(repository, chart)
@@ -14,7 +17,6 @@ class Chart(base.Base):
 
     def chart_should_exist(self, repository, chart_name, **kwargs):
         charts_data = self.get_charts(repository, **kwargs)
-        print "charts_data:", charts_data
         for chart in charts_data:
             if chart.name == chart_name:
                 return True

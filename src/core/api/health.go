@@ -22,20 +22,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goharbor/harbor/src/common/utils"
-
+	"github.com/docker/distribution/health"
 	"github.com/goharbor/harbor/src/common/dao"
 	httputil "github.com/goharbor/harbor/src/common/http"
-	"github.com/goharbor/harbor/src/common/utils/log"
+	"github.com/goharbor/harbor/src/common/utils"
 	"github.com/goharbor/harbor/src/core/config"
-
-	"github.com/docker/distribution/health"
-	"github.com/gomodule/redigo/redis"
+	"github.com/goharbor/harbor/src/lib/log"
+	"github.com/goharbor/harbor/src/lib/redis"
 )
 
 var (
-	timeout               = 60 * time.Second
-	healthCheckerRegistry = map[string]health.Checker{}
+	timeout = 60 * time.Second
+	// HealthCheckerRegistry ...
+	HealthCheckerRegistry = map[string]health.Checker{}
 )
 
 type overallHealthStatus struct {
@@ -67,11 +66,11 @@ type HealthAPI struct {
 func (h *HealthAPI) CheckHealth() {
 	var isHealthy healthy = true
 	components := []*componentHealthStatus{}
-	c := make(chan *componentHealthStatus, len(healthCheckerRegistry))
-	for name, checker := range healthCheckerRegistry {
+	c := make(chan *componentHealthStatus, len(HealthCheckerRegistry))
+	for name, checker := range HealthCheckerRegistry {
 		go check(name, checker, timeout, c)
 	}
-	for i := 0; i < len(healthCheckerRegistry); i++ {
+	for i := 0; i < len(HealthCheckerRegistry); i++ {
 		componentStatus := <-c
 		if len(componentStatus.Error) != 0 {
 			isHealthy = false
@@ -132,7 +131,8 @@ func HTTPStatusCodeHealthChecker(method string, url string, header http.Header,
 		}
 
 		client := httputil.NewClient(&http.Client{
-			Timeout: timeout,
+			Transport: httputil.GetHTTPTransport(httputil.SecureTransport),
+			Timeout:   timeout,
 		})
 		resp, err := client.Do(req)
 		if err != nil {
@@ -212,10 +212,10 @@ func jobserviceHealthChecker() health.Checker {
 }
 
 func registryHealthChecker() health.Checker {
-	url := getRegistryURL() + "/v2"
+	url := getRegistryURL() + "/"
 	timeout := 60 * time.Second
 	period := 10 * time.Second
-	checker := HTTPStatusCodeHealthChecker(http.MethodGet, url, nil, timeout, http.StatusUnauthorized)
+	checker := HTTPStatusCodeHealthChecker(http.MethodGet, url, nil, timeout, http.StatusOK)
 	return PeriodicHealthChecker(checker, period)
 }
 
@@ -233,14 +233,6 @@ func chartmuseumHealthChecker() health.Checker {
 		log.Errorf("failed to get the URL of chartmuseum: %v", err)
 	}
 	url = url + "/health"
-	timeout := 60 * time.Second
-	period := 10 * time.Second
-	checker := HTTPStatusCodeHealthChecker(http.MethodGet, url, nil, timeout, http.StatusOK)
-	return PeriodicHealthChecker(checker, period)
-}
-
-func clairHealthChecker() health.Checker {
-	url := config.GetClairHealthCheckServerURL() + "/health"
 	timeout := 60 * time.Second
 	period := 10 * time.Second
 	checker := HTTPStatusCodeHealthChecker(http.MethodGet, url, nil, timeout, http.StatusOK)
@@ -268,43 +260,28 @@ func databaseHealthChecker() health.Checker {
 }
 
 func redisHealthChecker() health.Checker {
-	url := config.GetRedisOfRegURL()
-	timeout := 60 * time.Second
 	period := 10 * time.Second
 	checker := health.CheckFunc(func() error {
-		conn, err := redis.DialURL(url,
-			redis.DialConnectTimeout(timeout*time.Second),
-			redis.DialReadTimeout(timeout*time.Second),
-			redis.DialWriteTimeout(timeout*time.Second))
-		if err != nil {
-			return fmt.Errorf("failed to establish connection with Redis: %v", err)
-		}
+		conn := redis.DefaultPool().Get()
 		defer conn.Close()
-		_, err = conn.Do("PING")
-		if err != nil {
-			return fmt.Errorf("failed to run \"PING\": %v", err)
-		}
 		return nil
 	})
 	return PeriodicHealthChecker(checker, period)
 }
 
 func registerHealthCheckers() {
-	healthCheckerRegistry["core"] = coreHealthChecker()
-	healthCheckerRegistry["portal"] = portalHealthChecker()
-	healthCheckerRegistry["jobservice"] = jobserviceHealthChecker()
-	healthCheckerRegistry["registry"] = registryHealthChecker()
-	healthCheckerRegistry["registryctl"] = registryCtlHealthChecker()
-	healthCheckerRegistry["database"] = databaseHealthChecker()
-	healthCheckerRegistry["redis"] = redisHealthChecker()
+	HealthCheckerRegistry["core"] = coreHealthChecker()
+	HealthCheckerRegistry["portal"] = portalHealthChecker()
+	HealthCheckerRegistry["jobservice"] = jobserviceHealthChecker()
+	HealthCheckerRegistry["registry"] = registryHealthChecker()
+	HealthCheckerRegistry["registryctl"] = registryCtlHealthChecker()
+	HealthCheckerRegistry["database"] = databaseHealthChecker()
+	HealthCheckerRegistry["redis"] = redisHealthChecker()
 	if config.WithChartMuseum() {
-		healthCheckerRegistry["chartmuseum"] = chartmuseumHealthChecker()
-	}
-	if config.WithClair() {
-		healthCheckerRegistry["clair"] = clairHealthChecker()
+		HealthCheckerRegistry["chartmuseum"] = chartmuseumHealthChecker()
 	}
 	if config.WithNotary() {
-		healthCheckerRegistry["notary"] = notaryHealthChecker()
+		HealthCheckerRegistry["notary"] = notaryHealthChecker()
 	}
 }
 

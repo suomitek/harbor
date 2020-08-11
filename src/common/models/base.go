@@ -19,18 +19,11 @@ import (
 )
 
 func init() {
-	orm.RegisterModel(new(RepTarget),
-		new(RepPolicy),
-		new(RepJob),
+	orm.RegisterModel(
 		new(User),
 		new(Project),
 		new(Role),
-		new(AccessLog),
-		new(ScanJob),
 		new(RepoRecord),
-		new(ImgScanOverview),
-		new(ClairVulnTimestamp),
-		new(WatchItem),
 		new(ProjectMetadata),
 		new(ConfigEntry),
 		new(Label),
@@ -38,6 +31,11 @@ func init() {
 		new(UserGroup),
 		new(AdminJob),
 		new(JobLog),
-		new(Robot),
-		new(OIDCUser))
+		new(OIDCUser),
+		new(NotificationPolicy),
+		new(NotificationJob),
+		new(ProjectBlob),
+		new(ArtifactAndBlob),
+		new(CVEAllowlist),
+	)
 }

@@ -18,9 +18,8 @@ package rbac
 const (
 	ActionAll = Action("*") // action match any other actions
 
-	ActionPull     = Action("pull")      // pull repository tag
-	ActionPush     = Action("push")      // push repository tag
-	ActionPushPull = Action("push+pull") // compatible with security all perm of project
+	ActionPull = Action("pull") // pull repository tag
+	ActionPush = Action("push") // push repository tag
 
 	// create, read, update, delete, list actions compatible with restful api methods
 	ActionCreate = Action("create")
@@ -28,29 +27,34 @@ const (
 	ActionUpdate = Action("update")
 	ActionDelete = Action("delete")
 	ActionList   = Action("list")
+
+	ActionOperate     = Action("operate")
+	ActionScannerPull = Action("scanner-pull") // for robot account created by scanner to pull image, bypass the policy check
 )
 
 // const resource variables
 const (
-	ResourceAll                        = Resource("*")             // resource match any other resources
-	ResourceConfiguration              = Resource("configuration") // project configuration compatible for portal only
-	ResourceHelmChart                  = Resource("helm-chart")
-	ResourceHelmChartVersion           = Resource("helm-chart-version")
-	ResourceHelmChartVersionLabel      = Resource("helm-chart-version-label")
-	ResourceLabel                      = Resource("label")
-	ResourceLabelResource              = Resource("label-resource")
-	ResourceLog                        = Resource("log")
-	ResourceMember                     = Resource("member")
-	ResourceMetadata                   = Resource("metadata")
-	ResourceReplication                = Resource("replication")
-	ResourceReplicationJob             = Resource("replication-job")
-	ResourceRepository                 = Resource("repository")
-	ResourceRepositoryLabel            = Resource("repository-label")
-	ResourceRepositoryTag              = Resource("repository-tag")
-	ResourceRepositoryTagLabel         = Resource("repository-tag-label")
-	ResourceRepositoryTagManifest      = Resource("repository-tag-manifest")
-	ResourceRepositoryTagScanJob       = Resource("repository-tag-scan-job")
-	ResourceRepositoryTagVulnerability = Resource("repository-tag-vulnerability")
-	ResourceRobot                      = Resource("robot")
-	ResourceSelf                       = Resource("") // subresource for self
+	ResourceAll                   = Resource("*")             // resource match any other resources
+	ResourceConfiguration         = Resource("configuration") // project configuration compatible for portal only
+	ResourceHelmChart             = Resource("helm-chart")
+	ResourceHelmChartVersion      = Resource("helm-chart-version")
+	ResourceHelmChartVersionLabel = Resource("helm-chart-version-label")
+	ResourceLabel                 = Resource("label")
+	ResourceLog                   = Resource("log")
+	ResourceMember                = Resource("member")
+	ResourceMetadata              = Resource("metadata")
+	ResourceQuota                 = Resource("quota")
+	ResourceRepository            = Resource("repository")
+	ResourceTagRetention          = Resource("tag-retention")
+	ResourceImmutableTag          = Resource("immutable-tag")
+	ResourceRobot                 = Resource("robot")
+	ResourceNotificationPolicy    = Resource("notification-policy")
+	ResourceScan                  = Resource("scan")
+	ResourceScanner               = Resource("scanner")
+	ResourceArtifact              = Resource("artifact")
+	ResourceTag                   = Resource("tag")
+	ResourceArtifactAddition      = Resource("artifact-addition")
+	ResourceArtifactLabel         = Resource("artifact-label")
+	ResourcePreatPolicy           = Resource("preheat-policy")
+	ResourceSelf                  = Resource("") // subresource for self
 )

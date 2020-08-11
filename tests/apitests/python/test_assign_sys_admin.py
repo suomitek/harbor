@@ -10,15 +10,12 @@ from library.configurations import Configurations
 class TestProjects(unittest.TestCase):
     @classmethod
     def setUp(self):
-        conf = Configurations()
-        self.conf= conf
-
-        user = User()
-        self.user= user
+        self.conf= Configurations()
+        self.user = User()
 
     @classmethod
     def tearDown(self):
-        print "Case completed"
+        print("Case completed")
 
     @unittest.skipIf(TEARDOWN == False, "Test data won't be erased.")
     def test_ClearData(self):
@@ -45,15 +42,15 @@ class TestProjects(unittest.TestCase):
         USER_ASSIGN_SYS_ADMIN_CLIENT=dict(endpoint = url, username = user_assign_sys_admin_name, password = user_assign_sys_admin_password)
 
         #2. Set user(UA) has sysadmin role by admin, check user(UA) can modify system configuration;
-        self.user.update_uesr_role_as_sysadmin(TestProjects.user_assign_sys_admin_id, True, **ADMIN_CLIENT)
+        self.user.update_user_role_as_sysadmin(TestProjects.user_assign_sys_admin_id, True, **ADMIN_CLIENT)
         self.conf.set_configurations_of_token_expiration(60, **USER_ASSIGN_SYS_ADMIN_CLIENT)
 
         #3. Set user(UA) has no sysadmin role by admin, check user(UA) can not modify system configuration;
-        self.user.update_uesr_role_as_sysadmin(TestProjects.user_assign_sys_admin_id, False, **ADMIN_CLIENT)
+        self.user.update_user_role_as_sysadmin(TestProjects.user_assign_sys_admin_id, False, **ADMIN_CLIENT)
         self.conf.set_configurations_of_token_expiration(70, expect_status_code = 403, **USER_ASSIGN_SYS_ADMIN_CLIENT)
 
         #4. Set user(UA) has sysadmin role by admin, check user(UA) can modify system configuration.
-        self.user.update_uesr_role_as_sysadmin(TestProjects.user_assign_sys_admin_id, True, **ADMIN_CLIENT)
+        self.user.update_user_role_as_sysadmin(TestProjects.user_assign_sys_admin_id, True, **ADMIN_CLIENT)
         self.conf.set_configurations_of_token_expiration(80, **USER_ASSIGN_SYS_ADMIN_CLIENT)
 
 if __name__ == '__main__':

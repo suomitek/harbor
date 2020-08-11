@@ -3,14 +3,15 @@ package api
 import (
 	"testing"
 
-	"github.com/goharbor/harbor/tests/apitests/apilib"
+	"github.com/goharbor/harbor/src/testing/apitests/apilib"
 	"github.com/stretchr/testify/assert"
 )
 
-var adminJob001 apilib.AdminJobReq
-
 func TestGCPost(t *testing.T) {
 
+	adminJob001 := apilib.AdminJobReq{
+		Parameters: map[string]interface{}{"delete_untagged": false},
+	}
 	assert := assert.New(t)
 	apiTest := newHarborAPI()
 
@@ -20,7 +21,7 @@ func TestGCPost(t *testing.T) {
 		t.Error("Error occurred while add a admin job", err.Error())
 		t.Log(err)
 	} else {
-		assert.Equal(200, code, "Add adminjob status should be 200")
+		assert.Equal(201, code, "Add adminjob status should be 201")
 	}
 }
 

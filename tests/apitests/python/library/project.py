@@ -47,6 +47,14 @@ class Project(base.Base):
         base._assert_status_code(200, status_code)
         return data
 
+    def get_project_id(self, project_name, **kwargs):
+        project_data = self.get_projects(dict(), **kwargs)
+        actual_count = len(project_data)
+        if actual_count == 1 and str(project_data[0].project_name) != str(project_name):
+            return project_data[0].project_id
+        else:
+            return None
+
     def projects_should_exist(self, params, expected_count = None, expected_project_id = None, **kwargs):
         project_data = self.get_projects(params, **kwargs)
         actual_count = len(project_data)
@@ -57,11 +65,14 @@ class Project(base.Base):
 
     def check_project_name_exist(self, name=None, **kwargs):
         client = self._get_client(**kwargs)
-        _, status_code, _ = client.projects_head_with_http_info(name)
+        try:
+            _, status_code, _ = client.projects_head_with_http_info(name)
+        except ApiException as e:
+            status_code = -1
         return {
             200: True,
             404: False,
-        }.get(status_code,'error')
+        }.get(status_code,False)
 
     def get_project(self, project_id, expect_status_code = 200, expect_response_body = None, **kwargs):
         client = self._get_client(**kwargs)
@@ -77,29 +88,20 @@ class Project(base.Base):
         base._assert_status_code(200, status_code)
         return data
 
-    def update_project(self, project_id, metadata, **kwargs):
+    def update_project(self, project_id, expect_status_code=200, metadata=None, cve_allowlist=None, **kwargs):
         client = self._get_client(**kwargs)
-        project = swagger_client.Project(project_id, None, None, None, None, None, None, None, None, None, None, metadata)
-        _, status_code, _ = client.projects_project_id_put_with_http_info(project_id, project)
-        base._assert_status_code(200, status_code)
+        project = swagger_client.ProjectReq(metadata=metadata, cve_allowlist=cve_allowlist)
+        try:
+            _, sc, _ = client.projects_project_id_put_with_http_info(project_id, project)
+        except ApiException as e:
+            base._assert_status_code(expect_status_code, e.status)
+        else:
+            base._assert_status_code(expect_status_code, sc)
 
     def delete_project(self, project_id, expect_status_code = 200, **kwargs):
         client = self._get_client(**kwargs)
         _, status_code, _ = client.projects_project_id_delete_with_http_info(project_id)
         base._assert_status_code(expect_status_code, status_code)
-
-    def get_project_metadata_by_name(self, project_id, meta_name, expect_status_code = 200, **kwargs):
-        client = self._get_client(**kwargs)
-        ProjectMetadata = swagger_client.ProjectMetadata()
-        ProjectMetadata, status_code, _ = client.projects_project_id_metadatas_meta_name_get_with_http_info(project_id, meta_name)
-        base._assert_status_code(expect_status_code, status_code)
-        return {
-            'public': ProjectMetadata.public,
-            'enable_content_trust': ProjectMetadata.enable_content_trust,
-            'prevent_vul': ProjectMetadata.prevent_vul,
-            'auto_scan': ProjectMetadata.auto_scan,
-            'severity': ProjectMetadata.severity,
-        }.get(meta_name,'error')
 
     def get_project_log(self, project_id, expect_status_code = 200, **kwargs):
         client = self._get_client(**kwargs)
@@ -160,7 +162,6 @@ class Project(base.Base):
     def update_project_member_role(self, project_id, member_id, member_role_id, expect_status_code = 200, **kwargs):
         client = self._get_client(**kwargs)
         role = swagger_client.Role(role_id = member_role_id)
-        data = []
         data, status_code, _ = client.projects_project_id_members_mid_put_with_http_info(project_id, member_id, role = role)
         base._assert_status_code(expect_status_code, status_code)
         base._assert_status_code(200, status_code)
@@ -183,7 +184,7 @@ class Project(base.Base):
         base._assert_status_code(expect_status_code, status_code)
         return base._get_id_from_header(header)
 
-    def add_project_robot_account(self, project_id, project_name, robot_name = None, robot_desc = None, has_pull_right = True,  has_push_right = True,  expect_status_code = 201, **kwargs):
+    def add_project_robot_account(self, project_id, project_name, expires_at, robot_name = None, robot_desc = None, has_pull_right = True,  has_push_right = True, has_chart_read_right = True,  has_chart_create_right = True, expect_status_code = 201, **kwargs):
         if robot_name is None:
             robot_name = base._random_name("robot")
         if robot_desc is None:
@@ -192,20 +193,26 @@ class Project(base.Base):
             has_pull_right = True
         access_list = []
         resource_by_project_id = "/project/"+str(project_id)+"/repository"
-        resource_by_project_name = "/project/"+project_name+"/repository"
+        resource_helm_by_project_id = "/project/"+str(project_id)+"/helm-chart"
+        resource_helm_create_by_project_id = "/project/"+str(project_id)+"/helm-chart-version"
         action_pull = "pull"
         action_push = "push"
+        action_read = "read"
+        action_create = "create"
         if has_pull_right is True:
             robotAccountAccess = swagger_client.RobotAccountAccess(resource = resource_by_project_id, action = action_pull)
-            access_list.append(robotAccountAccess)
-            robotAccountAccess = swagger_client.RobotAccountAccess(resource = resource_by_project_name, action = action_pull)
             access_list.append(robotAccountAccess)
         if has_push_right is True:
             robotAccountAccess = swagger_client.RobotAccountAccess(resource = resource_by_project_id, action = action_push)
             access_list.append(robotAccountAccess)
-            robotAccountAccess = swagger_client.RobotAccountAccess(resource = resource_by_project_name, action = action_push)
+        if has_chart_read_right is True:
+            robotAccountAccess = swagger_client.RobotAccountAccess(resource = resource_helm_by_project_id, action = action_read)
             access_list.append(robotAccountAccess)
-        robotAccountCreate = swagger_client.RobotAccountCreate(robot_name, robot_desc, access_list)
+        if has_chart_create_right is True:
+            robotAccountAccess = swagger_client.RobotAccountAccess(resource = resource_helm_create_by_project_id, action = action_create)
+            access_list.append(robotAccountAccess)
+
+        robotAccountCreate = swagger_client.RobotAccountCreate(robot_name, robot_desc, expires_at, access_list)
         client = self._get_client(**kwargs)
         data = []
         data, status_code, header = client.projects_project_id_robots_post_with_http_info(project_id, robotAccountCreate)

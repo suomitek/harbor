@@ -22,7 +22,7 @@ import (
 	"github.com/goharbor/harbor/src/common/dao"
 	"github.com/goharbor/harbor/src/common/models"
 	"github.com/goharbor/harbor/src/common/utils"
-	"github.com/goharbor/harbor/src/common/utils/log"
+	"github.com/goharbor/harbor/src/lib/log"
 )
 
 // Database - Used to load/save configuration in database
@@ -40,7 +40,7 @@ func (d *Database) Load() (map[string]interface{}, error) {
 
 		itemMetadata, ok := metadata.Instance().GetByName(item.Key)
 		if !ok {
-			log.Warningf("failed to get metadata, key:%v, error:%v, skip to load item", item.Key, err)
+			log.Debugf("failed to get metadata, key:%v, error:%v, skip to load item", item.Key, err)
 			continue
 		}
 		if itemMetadata.Scope == metadata.SystemScope {

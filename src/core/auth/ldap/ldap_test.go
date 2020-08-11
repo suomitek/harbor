@@ -24,10 +24,11 @@ import (
 	"github.com/goharbor/harbor/src/common/dao"
 	"github.com/goharbor/harbor/src/common/dao/project"
 	"github.com/goharbor/harbor/src/common/models"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/common/utils/test"
 	"github.com/goharbor/harbor/src/core/api"
+	"github.com/goharbor/harbor/src/lib/log"
 
+	"github.com/goharbor/harbor/src/common/dao/group"
 	"github.com/goharbor/harbor/src/core/auth"
 	coreConfig "github.com/goharbor/harbor/src/core/config"
 )
@@ -50,13 +51,12 @@ var ldapTestConfig = map[string]interface{}{
 	common.LDAPFilter:             "",
 	common.LDAPScope:              2,
 	common.LDAPTimeout:            30,
-	common.CfgExpiration:          5,
 	common.AdminInitialPassword:   "password",
 	common.LDAPGroupSearchFilter:  "objectclass=groupOfNames",
 	common.LDAPGroupBaseDN:        "dc=example,dc=com",
 	common.LDAPGroupAttributeName: "cn",
 	common.LDAPGroupSearchScope:   2,
-	common.LdapGroupAdminDn:       "cn=harbor_users,ou=groups,dc=example,dc=com",
+	common.LDAPGroupAdminDn:       "cn=harbor_users,ou=groups,dc=example,dc=com",
 }
 
 func TestMain(m *testing.M) {
@@ -91,10 +91,10 @@ func TestMain(m *testing.M) {
 		"delete from project where name='member_test_02'",
 		"delete from harbor_user where username='member_test_01' or username='pm_sample'",
 		"delete from user_group",
-		"delete from project_member",
+		"delete from project_member where id > 1",
 	}
-	dao.PrepareTestData(clearSqls, initSqls)
-
+	dao.ExecuteBatchSQL(initSqls)
+	defer dao.ExecuteBatchSQL(clearSqls)
 	retCode := m.Run()
 	os.Exit(retCode)
 }
@@ -163,7 +163,7 @@ func TestAuthenticateWithAdmin(t *testing.T) {
 	if user.Username != "mike" {
 		t.Errorf("unexpected ldap user authenticate fail: %s = %s", "user.Username", user.Username)
 	}
-	if !user.HasAdminRole {
+	if !user.AdminRoleInAuth {
 		t.Errorf("ldap user mike should have admin role!")
 	}
 }
@@ -179,7 +179,7 @@ func TestAuthenticateWithoutAdmin(t *testing.T) {
 	if user.Username != "user001" {
 		t.Errorf("unexpected ldap user authenticate fail: %s = %s", "user.Username", user.Username)
 	}
-	if user.HasAdminRole {
+	if user.AdminRoleInAuth {
 		t.Errorf("ldap user user001 should not have admin role!")
 	}
 }
@@ -225,7 +225,7 @@ func TestOnBoardUser_02(t *testing.T) {
 		t.Errorf("Failed to onboard user")
 	}
 
-	assert.Equal(t, "sample02@placeholder.com", user.Email)
+	assert.Equal(t, "", user.Email)
 	dao.CleanUser(int64(user.UserID))
 }
 
@@ -368,7 +368,7 @@ func TestAddProjectMemberWithLdapUser(t *testing.T) {
 		MemberUser: models.User{
 			Username: "mike",
 		},
-		Role: models.PROJECTADMIN,
+		Role: common.RoleProjectAdmin,
 	}
 	pmid, err := api.AddProjectMember(currentProject.ProjectID, member)
 	if err != nil {
@@ -387,7 +387,7 @@ func TestAddProjectMemberWithLdapUser(t *testing.T) {
 		MemberUser: models.User{
 			Username: "mike",
 		},
-		Role: models.PROJECTADMIN,
+		Role: common.RoleProjectAdmin,
 	}
 	pmid, err = api.AddProjectMember(currentProject.ProjectID, member2)
 	if err != nil {
@@ -402,12 +402,14 @@ func TestAddProjectMemberWithLdapGroup(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error occurred when GetProjectByName: %v", err)
 	}
+	userGroups := []models.UserGroup{{GroupName: "cn=harbor_users,ou=groups,dc=example,dc=com", LdapGroupDN: "cn=harbor_users,ou=groups,dc=example,dc=com", GroupType: common.LDAPGroupType}}
+	groupIds, err := group.PopulateGroup(userGroups)
 	member := models.MemberReq{
 		ProjectID: currentProject.ProjectID,
 		MemberGroup: models.UserGroup{
-			LdapGroupDN: "cn=harbor_users,ou=groups,dc=example,dc=com",
+			ID: groupIds[0],
 		},
-		Role: models.PROJECTADMIN,
+		Role: common.RoleProjectAdmin,
 	}
 	pmid, err := api.AddProjectMember(currentProject.ProjectID, member)
 	if err != nil {

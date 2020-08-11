@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/goharbor/harbor/src/common"
 	"github.com/goharbor/harbor/src/common/dao"
+	"github.com/goharbor/harbor/src/common/dao/group"
+	"github.com/goharbor/harbor/src/common/models"
 	"github.com/goharbor/harbor/src/common/utils"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/core/config"
-	"github.com/pkg/errors"
+	"github.com/goharbor/harbor/src/lib/errors"
+	"github.com/goharbor/harbor/src/lib/log"
 	"sync"
 )
 
@@ -28,12 +31,9 @@ func verifyError(err error) error {
 
 // SecretManager is the interface for store and verify the secret
 type SecretManager interface {
-	// SetSecret sets the secret and token based on the ID of the user, when setting the secret the user has to be
-	// onboarded to Harbor DB.
-	SetSecret(userID int, secret string, token *Token) error
 	// VerifySecret verifies the secret and the token associated with it, it refreshes the token in the DB if it's
-	// refreshed during the verification
-	VerifySecret(ctx context.Context, userID int, secret string) error
+	// refreshed during the verification.  It returns a populated user model based on the ID token associated with the secret.
+	VerifySecret(ctx context.Context, username string, secret string) (*models.User, error)
 }
 
 type defaultManager struct {
@@ -58,73 +58,75 @@ func (dm *defaultManager) getEncryptKey() (string, error) {
 	return dm.key, nil
 }
 
-// SetSecret sets the secret and token based on the ID of the user, when setting the secret the user has to be
-// onboarded to Harbor DB.
-func (dm *defaultManager) SetSecret(userID int, secret string, token *Token) error {
-	key, err := dm.getEncryptKey()
+// VerifySecret verifies the secret and the token associated with it, it refreshes the token in the DB if it's
+// refreshed during the verification.  It returns a populated user model based on the ID token associated with the secret.
+func (dm *defaultManager) VerifySecret(ctx context.Context, username string, secret string) (*models.User, error) {
+	user, err := dao.GetUser(models.User{Username: username})
 	if err != nil {
-		return fmt.Errorf("failed to load the key for encryption/decryption： %v", err)
+		return nil, err
 	}
-	oidcUser, err := dao.GetOIDCUserByUserID(userID)
-	if oidcUser == nil {
-		return fmt.Errorf("failed to get oidc user info, error: %v", err)
+	if user == nil {
+		return nil, verifyError(fmt.Errorf("user does not exist, name: %s", username))
 	}
-	encSecret, _ := utils.ReversibleEncrypt(secret, key)
-	tb, _ := json.Marshal(token)
-	encToken, _ := utils.ReversibleEncrypt(string(tb), key)
-	oidcUser.Secret = encSecret
-	oidcUser.Token = encToken
-	return dao.UpdateOIDCUser(oidcUser)
-}
-
-// VerifySecret verifies the secret and the token associated with it, it tries to update the token in the DB if it's
-// refreshed during the verification
-func (dm *defaultManager) VerifySecret(ctx context.Context, userID int, secret string) error {
-	oidcUser, err := dao.GetOIDCUserByUserID(userID)
+	oidcUser, err := dao.GetOIDCUserByUserID(user.UserID)
 	if err != nil {
-		return fmt.Errorf("failed to get oidc user info, error: %v", err)
+		return nil, fmt.Errorf("failed to get oidc user info, error: %v", err)
 	}
 	if oidcUser == nil {
-		return fmt.Errorf("user is not onboarded as OIDC user")
+		return nil, fmt.Errorf("user is not onboarded as OIDC user")
 	}
 	key, err := dm.getEncryptKey()
 	if err != nil {
-		return fmt.Errorf("failed to load the key for encryption/decryption： %v", err)
+		return nil, fmt.Errorf("failed to load the key for encryption/decryption： %v", err)
 	}
 	plainSecret, err := utils.ReversibleDecrypt(oidcUser.Secret, key)
 	if err != nil {
-		return fmt.Errorf("failed to decrypt secret from DB: %v", err)
+		return nil, fmt.Errorf("failed to decrypt secret from DB: %v", err)
 	}
 	if secret != plainSecret {
-		return verifyError(errors.New("secret mismatch"))
+		return nil, verifyError(errors.New("secret mismatch"))
 	}
 	tokenStr, err := utils.ReversibleDecrypt(oidcUser.Token, key)
 	if err != nil {
-		return verifyError(err)
+		return nil, verifyError(err)
 	}
 	token := &Token{}
 	err = json.Unmarshal(([]byte)(tokenStr), token)
 	if err != nil {
-		return verifyError(err)
+		return nil, verifyError(err)
 	}
-	_, err = VerifyToken(ctx, token.IDToken)
-	if err == nil {
-		return nil
+	if !token.Valid() {
+		log.Debug("Refreshing token")
+		token, err = refreshToken(ctx, token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh token")
+		}
+		tb, err := json.Marshal(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode the refreshed token, error: %v", err)
+		}
+		encToken, _ := utils.ReversibleEncrypt(string(tb), key)
+		oidcUser.Token = encToken
+		err = dao.UpdateOIDCUser(oidcUser)
+		if err != nil {
+			log.Errorf("Failed to persist token, user id: %d, error: %v", oidcUser.UserID, err)
+		}
+		log.Debug("Token refreshed and persisted")
 	}
-	log.Infof("Failed to verify ID Token, error: %v, refreshing...", err)
-	t, err := RefreshToken(ctx, token)
+	info, err := UserInfoFromToken(ctx, token)
 	if err != nil {
-		return verifyError(err)
+		return nil, verifyError(err)
 	}
-	err = dm.SetSecret(oidcUser.UserID, secret, t)
+	gids, err := group.PopulateGroup(models.UserGroupsFromName(info.Groups, common.OIDCGroupType))
 	if err != nil {
-		log.Warningf("Failed to update the token in DB: %v, ignore this error.", err)
+		log.Warningf("failed to get group ID, error: %v, skip populating groups", err)
+	} else {
+		user.GroupIDs = gids
 	}
-	return nil
+	return user, nil
 }
 
-// VerifySecret verifies the secret and the token associated with it, it tries to update the token in the DB if it's
-// refreshed during the verification
-func VerifySecret(ctx context.Context, userID int, secret string) error {
-	return m.VerifySecret(ctx, userID, secret)
+// VerifySecret calls the manager to verify the secret.
+func VerifySecret(ctx context.Context, name string, secret string) (*models.User, error) {
+	return m.VerifySecret(ctx, name, secret)
 }

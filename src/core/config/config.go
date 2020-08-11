@@ -18,31 +18,26 @@
 package config
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io/ioutil"
-	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/goharbor/harbor/src/common"
 	comcfg "github.com/goharbor/harbor/src/common/config"
 	"github.com/goharbor/harbor/src/common/models"
 	"github.com/goharbor/harbor/src/common/secret"
-	"github.com/goharbor/harbor/src/common/utils/log"
 	"github.com/goharbor/harbor/src/core/promgr"
-	"github.com/goharbor/harbor/src/core/promgr/pmsdriver"
-	"github.com/goharbor/harbor/src/core/promgr/pmsdriver/admiral"
 	"github.com/goharbor/harbor/src/core/promgr/pmsdriver/local"
+	"github.com/goharbor/harbor/src/lib/log"
 )
 
 const (
 	defaultKeyPath                     = "/etc/core/key"
-	defaultTokenFilePath               = "/etc/core/token/tokens.properties"
 	defaultRegistryTokenPrivateKeyPath = "/etc/core/private_key.pem"
+
+	// SessionCookieName is the name of the cookie for session ID
+	SessionCookieName = "sid"
 )
 
 var (
@@ -51,18 +46,13 @@ var (
 	// GlobalProjectMgr is initialized based on the deploy mode
 	GlobalProjectMgr promgr.ProjectManager
 	keyProvider      comcfg.KeyProvider
-	// AdmiralClient is initialized only under integration deploy mode
-	// and can be passed to project manager as a parameter
-	AdmiralClient *http.Client
-	// TokenReader is used in integration mode to read token
-	TokenReader admiral.TokenReader
 	// defined as a var for testing.
 	defaultCACertPath = "/etc/core/ca/ca.crt"
 	cfgMgr            *comcfg.CfgManager
 )
 
 // Init configurations
-func Init() error {
+func Init() {
 	// init key provider
 	initKeyProvider()
 
@@ -71,13 +61,9 @@ func Init() error {
 	log.Info("init secret store")
 	// init secret store
 	initSecretStore()
-	log.Info("init project manager based on deploy mode")
-	// init project manager based on deploy mode
-	if err := initProjectManager(); err != nil {
-		log.Errorf("Failed to initialise project manager, error: %v", err)
-		return err
-	}
-	return nil
+	log.Info("init project manager")
+	// init project manager
+	initProjectManager()
 }
 
 // InitWithSettings init config with predefined configs, and optionally overwrite the keyprovider
@@ -106,46 +92,9 @@ func initSecretStore() {
 	SecretStore = secret.NewStore(m)
 }
 
-func initProjectManager() error {
-	var driver pmsdriver.PMSDriver
-	if WithAdmiral() {
-		log.Debugf("Initialising Admiral client with certificate: %s", defaultCACertPath)
-		content, err := ioutil.ReadFile(defaultCACertPath)
-		if err != nil {
-			return err
-		}
-		pool := x509.NewCertPool()
-		if ok := pool.AppendCertsFromPEM(content); !ok {
-			return fmt.Errorf("failed to append cert content into cert pool")
-		}
-		AdmiralClient = &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-				TLSClientConfig: &tls.Config{
-					RootCAs: pool,
-				},
-			},
-		}
-
-		// integration with admiral
-		log.Info("initializing the project manager based on PMS...")
-		path := os.Getenv("SERVICE_TOKEN_FILE_PATH")
-		if len(path) == 0 {
-			path = defaultTokenFilePath
-		}
-		log.Infof("service token file path: %s", path)
-		TokenReader = &admiral.FileTokenReader{
-			Path: path,
-		}
-		driver = admiral.NewDriver(AdmiralClient, AdmiralEndpoint(), TokenReader)
-	} else {
-		// standalone
-		log.Info("initializing the project manager based on local database...")
-		driver = local.NewDriver()
-	}
-	GlobalProjectMgr = promgr.NewDefaultProjectManager(driver, true)
-	return nil
-
+func initProjectManager() {
+	log.Info("initializing the project manager based on local database...")
+	GlobalProjectMgr = promgr.NewDefaultProjectManager(local.NewDriver(), true)
 }
 
 // GetCfgManager return the current config manager
@@ -168,7 +117,11 @@ func Upload(cfg map[string]interface{}) error {
 
 // GetSystemCfg returns the system configurations
 func GetSystemCfg() (map[string]interface{}, error) {
-	return cfgMgr.GetAll(), nil
+	sysCfg := cfgMgr.GetAll()
+	if len(sysCfg) == 0 {
+		return nil, errors.New("can not load system config, the database might be down")
+	}
+	return sysCfg, nil
 }
 
 // AuthMode ...
@@ -176,6 +129,7 @@ func AuthMode() (string, error) {
 	err := cfgMgr.Load()
 	if err != nil {
 		log.Errorf("failed to load config, error %v", err)
+		return "db_auth", err
 	}
 	return cfgMgr.Get(common.AUTHMode).GetString(), nil
 }
@@ -219,7 +173,7 @@ func LDAPGroupConf() (*models.LdapGroupConf, error) {
 		LdapGroupFilter:              cfgMgr.Get(common.LDAPGroupSearchFilter).GetString(),
 		LdapGroupNameAttribute:       cfgMgr.Get(common.LDAPGroupAttributeName).GetString(),
 		LdapGroupSearchScope:         cfgMgr.Get(common.LDAPGroupSearchScope).GetInt(),
-		LdapGroupAdminDN:             cfgMgr.Get(common.LdapGroupAdminDn).GetString(),
+		LdapGroupAdminDN:             cfgMgr.Get(common.LDAPGroupAdminDn).GetString(),
 		LdapGroupMembershipAttribute: cfgMgr.Get(common.LDAPGroupMembershipAttribute).GetString(),
 	}, nil
 }
@@ -246,7 +200,7 @@ func ExtURL() (string, error) {
 		log.Errorf("failed to load config, error %v", err)
 	}
 	l := strings.Split(endpoint, "://")
-	if len(l) > 0 {
+	if len(l) > 1 {
 		return l[1], nil
 	}
 	return endpoint, nil
@@ -264,18 +218,31 @@ func SelfRegistration() (bool, error) {
 
 // RegistryURL ...
 func RegistryURL() (string, error) {
-	return cfgMgr.Get(common.RegistryURL).GetString(), nil
+	url := os.Getenv("REGISTRY_URL")
+	if len(url) == 0 {
+		url = "http://registry:5000"
+	}
+	return url, nil
 }
 
 // InternalJobServiceURL returns jobservice URL for internal communication between Harbor containers
 func InternalJobServiceURL() string {
-	return strings.TrimSuffix(cfgMgr.Get(common.JobServiceURL).GetString(), "/")
+	return os.Getenv("JOBSERVICE_URL")
+}
+
+// GetCoreURL returns the url of core from env
+func GetCoreURL() string {
+	return os.Getenv("CORE_URL")
 }
 
 // InternalCoreURL returns the local harbor core url
 func InternalCoreURL() string {
 	return strings.TrimSuffix(cfgMgr.Get(common.CoreURL).GetString(), "/")
+}
 
+// LocalCoreURL returns the local harbor core url
+func LocalCoreURL() string {
+	return cfgMgr.Get(common.CoreLocalURL).GetString()
 }
 
 // InternalTokenServiceEndpoint returns token service endpoint for internal communication between Harbor containers
@@ -322,12 +289,14 @@ func Database() (*models.Database, error) {
 	database := &models.Database{}
 	database.Type = cfgMgr.Get(common.DatabaseType).GetString()
 	postgresql := &models.PostGreSQL{
-		Host:     cfgMgr.Get(common.PostGreSQLHOST).GetString(),
-		Port:     cfgMgr.Get(common.PostGreSQLPort).GetInt(),
-		Username: cfgMgr.Get(common.PostGreSQLUsername).GetString(),
-		Password: cfgMgr.Get(common.PostGreSQLPassword).GetString(),
-		Database: cfgMgr.Get(common.PostGreSQLDatabase).GetString(),
-		SSLMode:  cfgMgr.Get(common.PostGreSQLSSLMode).GetString(),
+		Host:         cfgMgr.Get(common.PostGreSQLHOST).GetString(),
+		Port:         cfgMgr.Get(common.PostGreSQLPort).GetInt(),
+		Username:     cfgMgr.Get(common.PostGreSQLUsername).GetString(),
+		Password:     cfgMgr.Get(common.PostGreSQLPassword).GetString(),
+		Database:     cfgMgr.Get(common.PostGreSQLDatabase).GetString(),
+		SSLMode:      cfgMgr.Get(common.PostGreSQLSSLMode).GetString(),
+		MaxIdleConns: cfgMgr.Get(common.PostGreSQLMaxIdleConns).GetInt(),
+		MaxOpenConns: cfgMgr.Get(common.PostGreSQLMaxOpenConns).GetInt(),
 	}
 	database.PostGreSQL = postgresql
 
@@ -338,6 +307,11 @@ func Database() (*models.Database, error) {
 // other component
 func CoreSecret() string {
 	return os.Getenv("CORE_SECRET")
+}
+
+// RegistryCredential returns the username and password the core uses to access registry
+func RegistryCredential() (string, string) {
+	return os.Getenv("REGISTRY_CREDENTIAL_USERNAME"), os.Getenv("REGISTRY_CREDENTIAL_PASSWORD")
 }
 
 // JobserviceSecret returns a secret to mark Jobservice when communicate with
@@ -357,46 +331,19 @@ func WithClair() bool {
 	return cfgMgr.Get(common.WithClair).GetBool()
 }
 
-// ClairEndpoint returns the end point of clair instance, by default it's the one deployed within Harbor.
-func ClairEndpoint() string {
-	return cfgMgr.Get(common.ClairURL).GetString()
+// ClairAdapterEndpoint returns the endpoint of clair adapter instance, by default it's the one deployed within Harbor.
+func ClairAdapterEndpoint() string {
+	return cfgMgr.Get(common.ClairAdapterURL).GetString()
 }
 
-// ClairDB return Clair db info
-func ClairDB() (*models.PostGreSQL, error) {
-	clairDB := &models.PostGreSQL{
-		Host:     cfgMgr.Get(common.ClairDBHost).GetString(),
-		Port:     cfgMgr.Get(common.ClairDBPort).GetInt(),
-		Username: cfgMgr.Get(common.ClairDBUsername).GetString(),
-		Password: cfgMgr.Get(common.ClairDBPassword).GetString(),
-		Database: cfgMgr.Get(common.ClairDB).GetString(),
-		SSLMode:  cfgMgr.Get(common.ClairDBSSLMode).GetString(),
-	}
-	return clairDB, nil
+// WithTrivy returns a bool value to indicate if Harbor's deployed with Trivy.
+func WithTrivy() bool {
+	return cfgMgr.Get(common.WithTrivy).GetBool()
 }
 
-// AdmiralEndpoint returns the URL of admiral, if Harbor is not deployed with admiral it should return an empty string.
-func AdmiralEndpoint() string {
-	if cfgMgr.Get(common.AdmiralEndpoint).GetString() == "NA" {
-		return ""
-	}
-	return cfgMgr.Get(common.AdmiralEndpoint).GetString()
-}
-
-// ScanAllPolicy returns the policy which controls the scan all.
-func ScanAllPolicy() models.ScanAllPolicy {
-	var res models.ScanAllPolicy
-	log.Infof("Scan all policy %v", cfgMgr.Get(common.ScanAllPolicy).GetString())
-	if err := json.Unmarshal([]byte(cfgMgr.Get(common.ScanAllPolicy).GetString()), &res); err != nil {
-		log.Errorf("Failed to unmarshal the value in configuration for Scan All policy, error: %v, returning the default policy", err)
-		return models.DefaultScanAllPolicy
-	}
-	return res
-}
-
-// WithAdmiral returns a bool to indicate if Harbor's deployed with admiral.
-func WithAdmiral() bool {
-	return len(AdmiralEndpoint()) > 0
+// TrivyAdapterURL returns the endpoint URL of a Trivy adapter instance, by default it's the one deployed within Harbor.
+func TrivyAdapterURL() string {
+	return cfgMgr.Get(common.TrivyAdapterURL).GetString()
 }
 
 // UAASettings returns the UAASettings to access UAA service.
@@ -450,19 +397,9 @@ func GetPortalURL() string {
 
 // GetRegistryCtlURL returns the URL of registryctl
 func GetRegistryCtlURL() string {
-	url := os.Getenv("REGISTRYCTL_URL")
+	url := os.Getenv("REGISTRY_CONTROLLER_URL")
 	if len(url) == 0 {
 		return common.DefaultRegistryCtlURL
-	}
-	return url
-}
-
-// GetClairHealthCheckServerURL returns the URL of
-// the health check server of Clair
-func GetClairHealthCheckServerURL() string {
-	url := os.Getenv("CLAIR_HEALTH_CHECK_SERVER_URL")
-	if len(url) == 0 {
-		return common.DefaultClairHealthCheckServerURL
 	}
 	return url
 }
@@ -477,9 +414,9 @@ func HTTPAuthProxySetting() (*models.HTTPAuthProxy, error) {
 		Endpoint:            cfgMgr.Get(common.HTTPAuthProxyEndpoint).GetString(),
 		TokenReviewEndpoint: cfgMgr.Get(common.HTTPAuthProxyTokenReviewEndpoint).GetString(),
 		VerifyCert:          cfgMgr.Get(common.HTTPAuthProxyVerifyCert).GetBool(),
-		AlwaysOnBoard:       cfgMgr.Get(common.HTTPAuthProxyAlwaysOnboard).GetBool(),
+		SkipSearch:          cfgMgr.Get(common.HTTPAuthProxySkipSearch).GetBool(),
+		ServerCertificate:   cfgMgr.Get(common.HTTPAuthProxyServerCertificate).GetString(),
 	}, nil
-
 }
 
 // OIDCSetting returns the setting of OIDC provider, currently there's only one OIDC provider allowed for Harbor and it's
@@ -499,9 +436,53 @@ func OIDCSetting() (*models.OIDCSetting, error) {
 		Name:         cfgMgr.Get(common.OIDCName).GetString(),
 		Endpoint:     cfgMgr.Get(common.OIDCEndpoint).GetString(),
 		VerifyCert:   cfgMgr.Get(common.OIDCVerifyCert).GetBool(),
+		AutoOnboard:  cfgMgr.Get(common.OIDCAutoOnboard).GetBool(),
 		ClientID:     cfgMgr.Get(common.OIDCCLientID).GetString(),
 		ClientSecret: cfgMgr.Get(common.OIDCClientSecret).GetString(),
+		GroupsClaim:  cfgMgr.Get(common.OIDCGroupsClaim).GetString(),
 		RedirectURL:  extEndpoint + common.OIDCCallbackPath,
 		Scope:        scope,
+		UserClaim:    cfgMgr.Get(common.OIDCUserClaim).GetString(),
 	}, nil
+}
+
+// NotificationEnable returns a bool to indicates if notification enabled in harbor
+func NotificationEnable() bool {
+	return cfgMgr.Get(common.NotificationEnable).GetBool()
+}
+
+// QuotaPerProjectEnable returns a bool to indicates if quota per project enabled in harbor
+func QuotaPerProjectEnable() bool {
+	return cfgMgr.Get(common.QuotaPerProjectEnable).GetBool()
+}
+
+// QuotaSetting returns the setting of quota.
+func QuotaSetting() (*models.QuotaSetting, error) {
+	if err := cfgMgr.Load(); err != nil {
+		return nil, err
+	}
+	return &models.QuotaSetting{
+		StoragePerProject: cfgMgr.Get(common.StoragePerProject).GetInt64(),
+	}, nil
+}
+
+// GetPermittedRegistryTypesForProxyCache returns the permitted registry types for proxy cache
+func GetPermittedRegistryTypesForProxyCache() []string {
+	types := os.Getenv("PERMITTED_REGISTRY_TYPES_FOR_PROXY_CACHE")
+	if len(types) == 0 {
+		return []string{}
+	}
+	return strings.Split(types, ",")
+}
+
+// GetGCTimeWindow returns the reserve time window of blob.
+func GetGCTimeWindow() int64 {
+	// the env is for testing/debugging. For production, Do NOT set it.
+	if env, exist := os.LookupEnv("GC_TIME_WINDOW_HOURS"); exist {
+		timeWindow, err := strconv.ParseInt(env, 10, 64)
+		if err == nil {
+			return timeWindow
+		}
+	}
+	return common.DefaultGCTimeWindowHours
 }

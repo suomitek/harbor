@@ -2,8 +2,8 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { Component, OnInit } from '@angular/core';
 import { OidcOnboardService } from './oidc-onboard.service';
 import { FormControl } from '@angular/forms';
-import { errorHandler } from "../shared/shared.utils";
-import { CommonRoutes } from '../shared/shared.const';
+import { CommonRoutes } from "../../lib/entities/shared.const";
+import { errorHandler } from "../../lib/utils/shared/shared.utils";
 
 @Component({
   selector: 'app-oidc-onboard',

@@ -18,15 +18,15 @@ import { TranslateService } from '@ngx-translate/core';
 import { PlatformLocation } from '@angular/common';
 import { ModalEvent } from '../modal-event';
 import { modalEvents } from '../modal-events.const';
-
 import { SessionService } from '../../shared/session.service';
 import { CookieService, CookieOptions } from 'ngx-cookie';
-
-import { supportedLangs, enLang, languageNames, CommonRoutes } from '../../shared/shared.const';
-import { AppConfigService } from '../../app-config.service';
+import { supportedLangs, enLang, languageNames } from '../../shared/shared.const';
+import { AppConfigService } from '../../services/app-config.service';
 import { SearchTriggerService } from '../global-search/search-trigger.service';
 import { MessageHandlerService } from '../../shared/message-handler/message-handler.service';
-import { SkinableConfig } from "../../skinable-config.service";
+import { SkinableConfig } from "../../services/skinable-config.service";
+import { CommonRoutes } from "../../../lib/entities/shared.const";
+
 
 @Component({
     selector: 'navigator',
@@ -37,13 +37,12 @@ import { SkinableConfig } from "../../skinable-config.service";
 export class NavigatorComponent implements OnInit {
     // constructor(private router: Router){}
     @Output() showAccountSettingsModal = new EventEmitter<ModalEvent>();
-    @Output() showPwdChangeModal = new EventEmitter<ModalEvent>();
+    @Output() showDialogModalAction = new EventEmitter<ModalEvent>();
 
     selectedLang: string = enLang;
     appTitle: string = 'APP_TITLE.HARBOR';
     customStyle: { [key: string]: any };
     customProjectName: { [key: string]: any };
-
     constructor(
         private session: SessionService,
         private router: Router,
@@ -60,8 +59,8 @@ export class NavigatorComponent implements OnInit {
         // custom skin
         let customSkinObj = this.skinableConfig.getSkinConfig();
         if (customSkinObj) {
-            if (customSkinObj.projects) {
-                this.customProjectName = customSkinObj.projects;
+            if (customSkinObj.product) {
+                this.customProjectName = customSkinObj.product;
             }
             this.customStyle = customSkinObj;
         }
@@ -113,8 +112,8 @@ export class NavigatorComponent implements OnInit {
         let user = this.session.getCurrentUser();
         let config = this.appConfigService.getConfig();
 
-        return user && ((config && !(config.auth_mode === "ldap_auth" || config.auth_mode === "uaa_auth")) ||
-            (user.user_id === 1 && user.username === "admin"));
+        return user && ((config && !(config.auth_mode === "ldap_auth" || config.auth_mode === "uaa_auth"
+        || config.auth_mode === "oidc_auth")) || (user.user_id === 1 && user.username === "admin"));
     }
 
     matchLang(lang: string): boolean {
@@ -131,7 +130,7 @@ export class NavigatorComponent implements OnInit {
 
     // Open change password dialog
     openChangePwdModal(): void {
-        this.showPwdChangeModal.emit({
+        this.showDialogModalAction.emit({
             modalName: modalEvents.CHANGE_PWD,
             modalFlag: true
         });
@@ -139,7 +138,7 @@ export class NavigatorComponent implements OnInit {
 
     // Open about dialog
     openAboutDialog(): void {
-        this.showPwdChangeModal.emit({
+        this.showDialogModalAction.emit({
             modalName: modalEvents.ABOUT,
             modalFlag: true
         });
